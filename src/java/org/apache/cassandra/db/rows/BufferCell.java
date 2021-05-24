@@ -32,11 +32,11 @@ public class BufferCell extends AbstractCell<ByteBuffer>
 {
     private static final long EMPTY_SIZE = ObjectSizes.measure(new BufferCell(ColumnMetadata.regularColumn("", "", "", ByteType.instance), 0L, 0, 0, ByteBufferUtil.EMPTY_BYTE_BUFFER, null));
 
-    private final long timestamp;
+    private long timestamp;
     private final int ttl;
     private final int localDeletionTime;
 
-    private final ByteBuffer value;
+    private ByteBuffer value;
     private final CellPath path;
 
     public BufferCell(ColumnMetadata column, long timestamp, int ttl, int localDeletionTime, ByteBuffer value, CellPath path)
@@ -49,6 +49,11 @@ public class BufferCell extends AbstractCell<ByteBuffer>
         this.localDeletionTime = localDeletionTime;
         this.value = value;
         this.path = path;
+    }
+
+    public void setValue(ByteBuffer value)
+    {
+        this.value = value;
     }
 
     public static BufferCell live(ColumnMetadata column, long timestamp, ByteBuffer value)
@@ -80,6 +85,11 @@ public class BufferCell extends AbstractCell<ByteBuffer>
     public static BufferCell tombstone(ColumnMetadata column, long timestamp, int nowInSec, CellPath path)
     {
         return new BufferCell(column, timestamp, NO_TTL, nowInSec, ByteBufferUtil.EMPTY_BYTE_BUFFER, path);
+    }
+
+    public void setTimestamp(long timestamp)
+    {
+        this.timestamp = timestamp;
     }
 
     public long timestamp()

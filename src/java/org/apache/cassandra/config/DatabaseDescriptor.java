@@ -309,7 +309,7 @@ public class DatabaseDescriptor
         return config;
     }
 
-    private static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException
+    public static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException
     {
         try
         {

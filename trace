@@ -1,0 +1,26 @@
+Read:
+    StorageProxy        fetchRows
+    ...
+    SelectStatement     process             (775)
+    SelectStatement     processResults      (425)
+    SelectStatement     execute             (402)
+    SelectStatement     execute             (250)
+    SelectStatement     execute             (88)
+
+Write:
+    StorageProxy            performLocally
+    StorageProxy            sendToHintedReplicas    -> Read, inc counter, propagate
+    StorageProxy            performWrite
+    StorageProxy            mutate                  -> Create resmsg with custom payload
+    StorageProxy            mutateWithTriggers
+    ModificationStatement   executeWithoutCondition
+    ModificationStatement   execute
+
+QueryProcessor      processStatement
+QueryProcessor      processPrepared -> read CustomPayload & Block
+ExecuteMessage      execute
+
+Message$Request     execute             (242)
+Dispatcher          processRequest      (81)
+Dispatcher          processRequest      (101)
+Dispatcher          lambda$dispatch$0   (65)

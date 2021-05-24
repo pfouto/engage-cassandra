@@ -472,7 +472,7 @@ public abstract class ModificationStatement implements CQLStatement
                          options.getNowInSeconds(queryState),
                          queryStartNanoTime);
         if (!mutations.isEmpty())
-            StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
+            return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
 
         return null;
     }

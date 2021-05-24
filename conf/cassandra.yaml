@@ -9,6 +9,10 @@
 # one logical cluster from joining another.
 cluster_name: 'Test Cluster'
 
+replication_mode: 'bayou'
+#bayou, engage, edgegage, saturn
+peer_interface: 'br0'
+
 # This defines the number of tokens randomly assigned to this node on the ring
 # The more tokens, relative to other nodes, the larger the proportion of data
 # that this node will store. You probably want all nodes to have the same number

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -63,6 +64,8 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     private volatile int failures = 0;
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
+
+    public ByteBuffer respClock;
 
     /**
       * Delegate to another WriteResponseHandler or possibly this one to track if the ideal consistency level was reached.

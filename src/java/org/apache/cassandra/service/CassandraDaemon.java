@@ -89,6 +89,10 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.Mx4jTool;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.WindowsTimer;
+import pfouto.proxy.GenericProxy;
+import pt.unl.fct.di.novasys.babel.core.Babel;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.exceptions.ProtocolAlreadyExistsException;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_FOREGROUND;
@@ -882,9 +886,13 @@ public class CassandraDaemon
         instance.deactivate();
     }
 
-    public static void main(String[] args)
+    public static void main(String[] args) throws ProtocolAlreadyExistsException, HandlerRegistrationException, IOException
     {
         instance.activate();
+        Babel b = Babel.getInstance();
+        b.registerProtocol(GenericProxy.instance);
+        GenericProxy.instance.init(null);
+        b.start();
     }
 
     public void clearConnectionHistory()
