@@ -20,7 +20,6 @@ package pfouto.proxy;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +29,13 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.querybuilder.Update;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
+import pfouto.ipc.MutationFinished;
 import pfouto.messages.side.DataMessage;
 import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
@@ -46,6 +45,7 @@ import pfouto.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.SimpleClientChannel;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.events.ServerDownEvent;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.events.ServerFailedEvent;
@@ -130,6 +130,8 @@ public abstract class GenericProxy extends GenericProtocol
                 registerMessageHandler(peerChannel, DataMessage.MSG_ID, this::onDataMessage, this::onMessageFailed);
                 registerMessageHandler(peerChannel, StabMessage.MSG_ID, this::onStabMessage, this::onMessageFailed);
             }
+
+            registerRequestHandler(MutationFinished.REQ_ID, this::onMutationFinished);
         }
         catch (Exception e)
         {
@@ -138,6 +140,7 @@ public abstract class GenericProxy extends GenericProtocol
         }
     }
 
+    abstract void onMutationFinished(MutationFinished request, short sourceProto);
     abstract void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId);
     abstract void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId);
     abstract void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId);

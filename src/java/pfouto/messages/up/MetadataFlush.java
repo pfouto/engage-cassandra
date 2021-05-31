@@ -20,6 +20,8 @@ package pfouto.messages.up;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.util.HashMap;
+import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
 import pfouto.Clock;
@@ -35,37 +37,39 @@ public class MetadataFlush extends ProtoMessage
         @Override
         public void serialize(MetadataFlush msg, ByteBuf out) throws IOException
         {
-            out.writeBytes(msg.source.getAddress());
-            out.writeInt(msg.vUp);
+            out.writeInt(msg.updates.size());
+            msg.updates.forEach((k,v ) -> {
+                out.writeBytes(k.getAddress());
+                out.writeInt(v);
+            });
         }
 
         @Override
         public MetadataFlush deserialize(ByteBuf in) throws IOException
         {
-            byte[] addrBytes = new byte[4];
-            in.readBytes(addrBytes);
-            int vUp = in.readInt();
-            return new MetadataFlush(InetAddress.getByAddress(addrBytes), vUp);
+            int mapSize = in.readInt();
+            Map<InetAddress, Integer> updates = new HashMap<>();
+            for(int i = 0;i<mapSize;i++){
+                byte[] addrBytes = new byte[4];
+                in.readBytes(addrBytes);
+                int vUp = in.readInt();
+                updates.put(InetAddress.getByAddress(addrBytes), vUp);
+            }
+            return new MetadataFlush(updates);
         }
     };
-    private final InetAddress source;
-    private final int vUp;
 
-    public MetadataFlush(InetAddress source, int vUp)
+    private final Map<InetAddress, Integer> updates;
+
+    public MetadataFlush(Map<InetAddress, Integer> updates)
     {
         super(MSG_ID);
-        this.source = source;
-        this.vUp = vUp;
+        this.updates = updates;
     }
 
-    public InetAddress getSource()
+    public Map<InetAddress, Integer> getUpdates()
     {
-        return source;
-    }
-
-    public int getvUp()
-    {
-        return vUp;
+        return updates;
     }
 
 }

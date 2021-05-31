@@ -52,10 +52,10 @@ public class UpdateNotification extends ProtoMessage
                 out.writeInt(0);
             }
             if(msg.mf != null){
-                out.writeByte(1);
+                out.writeBoolean(true);
                 MetadataFlush.serializer.serialize(msg.mf, out);
             } else {
-                out.writeByte(0);
+                out.writeBoolean(false);
             }
         }
 
@@ -74,8 +74,8 @@ public class UpdateNotification extends ProtoMessage
                 in.readBytes(data);
             } else data = null;
             MetadataFlush mf;
-            byte mfPresent = in.readByte();
-            if(mfPresent == 1) mf = MetadataFlush.serializer.deserialize(in);
+            boolean mfPresent = in.readBoolean();
+            if(mfPresent) mf = MetadataFlush.serializer.deserialize(in);
             else mf = null;
             return new UpdateNotification(InetAddress.getByAddress(addrBytes), vUp, partition, clock, data, mf);
         }

@@ -16,30 +16,34 @@
  * limitations under the License.
  */
 
-package pfouto;
+package pfouto.ipc;
 
-public class MutableInteger
+import java.net.InetAddress;
+
+import pfouto.messages.side.DataMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
+
+public class MutationFinished extends ProtoRequest
 {
+    public static final short REQ_ID = 101;
 
-    private int value;
+    private final DataMessage mutationMessage;
+    private final InetAddress source;
 
-    public MutableInteger(int initialValue)
+    public MutationFinished(DataMessage mutationMessage, InetAddress source)
     {
-        this.value = initialValue;
+        super(REQ_ID);
+        this.mutationMessage = mutationMessage;
+        this.source = source;
     }
 
-    public MutableInteger()
+    public DataMessage getMutationMessage()
     {
-        this(0);
+        return mutationMessage;
     }
 
-    public int getValue()
+    public InetAddress getSource()
     {
-        return value;
-    }
-
-    public void setValue(int value)
-    {
-        this.value = value;
+        return source;
     }
 }

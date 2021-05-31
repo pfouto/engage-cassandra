@@ -561,7 +561,7 @@ public class QueryProcessor implements QueryHandler
             Inet4Address key = entry.getKey();
             if(key.equals(GenericProxy.myAddr)) continue; //Ignore my own entry
             Integer clientValue = entry.getValue();
-            MutableInteger localValue = StorageProxy.globalClock.computeIfAbsent(key, k -> new MutableInteger(0));
+            MutableInteger localValue = StorageProxy.globalClock.computeIfAbsent(key, k -> new MutableInteger());
             if (localValue.getValue() >= clientValue) continue; //If already satisfied, no need for locks
             synchronized (localValue)
             {

@@ -64,6 +64,21 @@ public class DataMessage extends ProtoMessage
         this.vUp = vUp;
     }
 
+    public int getvUp()
+    {
+        return vUp;
+    }
+
+    public Clock getVectorClock()
+    {
+        return vectorClock;
+    }
+
+    public Mutation getMutation()
+    {
+        return mutation;
+    }
+
     @Override
     public String toString()
     {
