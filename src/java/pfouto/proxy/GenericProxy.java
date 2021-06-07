@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +37,8 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
+import pfouto.ImmutableInteger;
+import pfouto.MutableInteger;
 import pfouto.ipc.MutationFinished;
 import pfouto.messages.side.DataMessage;
 import pfouto.messages.side.StabMessage;
@@ -45,7 +49,6 @@ import pfouto.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
-import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.SimpleClientChannel;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.events.ServerDownEvent;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.events.ServerFailedEvent;
@@ -71,7 +74,7 @@ public abstract class GenericProxy extends GenericProtocol
     private static final Config conf;
 
     private static final Logger logger = LoggerFactory.getLogger(GenericProxy.class);
-
+    final ConcurrentMap<InetAddress, MutableInteger> globalClock;
     int clientChannel;
     int peerChannel;
     Map<String, List<Host>> targets;
@@ -80,6 +83,12 @@ public abstract class GenericProxy extends GenericProtocol
     public GenericProxy(String name)
     {
         super(name, (short) 100);
+        globalClock = new ConcurrentHashMap<>();
+    }
+
+    public ImmutableInteger getClockValue(InetAddress pos)
+    {
+        return globalClock.computeIfAbsent(pos, k -> new MutableInteger());
     }
 
     @Override
@@ -141,8 +150,11 @@ public abstract class GenericProxy extends GenericProtocol
     }
 
     abstract void onMutationFinished(MutationFinished request, short sourceProto);
+
     abstract void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId);
+
     abstract void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId);
+
     abstract void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId);
 
     abstract void onStabMessage(StabMessage msg, Host host, short sourceProto, int channelId);

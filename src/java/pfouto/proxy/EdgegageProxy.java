@@ -20,6 +20,12 @@ package pfouto.proxy;
 
 import org.apache.cassandra.db.Mutation;
 import pfouto.Clock;
+import pfouto.ipc.MutationFinished;
+import pfouto.messages.side.DataMessage;
+import pfouto.messages.side.StabMessage;
+import pfouto.messages.up.MetadataFlush;
+import pfouto.messages.up.UpdateNotification;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 public class EdgegageProxy extends GenericProxy
 {
@@ -27,6 +33,36 @@ public class EdgegageProxy extends GenericProxy
     public EdgegageProxy()
     {
         super("EdgegageProxy");
+    }
+
+    @Override
+    void onMutationFinished(MutationFinished request, short sourceProto)
+    {
+
+    }
+
+    @Override
+    void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId)
+    {
+
+    }
+
+    @Override
+    void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId)
+    {
+
+    }
+
+    @Override
+    void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId)
+    {
+
+    }
+
+    @Override
+    void onStabMessage(StabMessage msg, Host host, short sourceProto, int channelId)
+    {
+
     }
 
     @Override

@@ -62,6 +62,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
 import pfouto.Clock;
+import pfouto.ImmutableInteger;
 import pfouto.MutableInteger;
 import pfouto.proxy.GenericProxy;
 
@@ -561,7 +562,7 @@ public class QueryProcessor implements QueryHandler
             Inet4Address key = entry.getKey();
             if(key.equals(GenericProxy.myAddr)) continue; //Ignore my own entry
             Integer clientValue = entry.getValue();
-            MutableInteger localValue = StorageProxy.globalClock.computeIfAbsent(key, k -> new MutableInteger());
+            ImmutableInteger localValue = GenericProxy.instance.getClockValue(key);
             if (localValue.getValue() >= clientValue) continue; //If already satisfied, no need for locks
             synchronized (localValue)
             {

@@ -18,37 +18,7 @@
 
 package pfouto;
 
-public class MutableInteger implements ImmutableInteger
+public interface ImmutableInteger
 {
-
-    private int value;
-
-    public MutableInteger(int initialValue)
-    {
-        this.value = initialValue;
-    }
-
-    public MutableInteger()
-    {
-        this(0);
-    }
-
-    @Override
-    public int getValue()
-    {
-        return value;
-    }
-
-    public void setValue(int value)
-    {
-        this.value = value;
-    }
-
-    @Override
-    public String toString()
-    {
-        return "MutableInteger{" +
-               "value=" + value +
-               '}';
-    }
+    public int getValue();
 }

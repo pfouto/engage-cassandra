@@ -21,8 +21,10 @@ package pfouto.proxy;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 
@@ -31,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.service.StorageProxy;
 import pfouto.Clock;
 import pfouto.MutableInteger;
 import pfouto.ipc.MutationFinished;
@@ -50,7 +51,9 @@ public class EngageProxy extends GenericProxy
 
     Map<InetAddress, Queue<ProtoMessage>> pendingMetadata;
     Map<InetAddress, Map<Integer, DataMessage>> pendingData;
-    Map<InetAddress, Integer> executingData;
+
+    Map<InetAddress, MutableInteger> executing;
+    Map<InetAddress, PriorityQueue<Integer>> outOfOrderExecuted;
 
     public EngageProxy()
     {
@@ -60,120 +63,123 @@ public class EngageProxy extends GenericProxy
     private boolean canExec(Clock opClock)
     {
         for (Map.Entry<Inet4Address, Integer> opClockPos : opClock.getValue().entrySet())
-            if (StorageProxy.globalClock.computeIfAbsent(opClockPos.getKey(), k -> new MutableInteger()).getValue()
-                < opClockPos.getValue())
+            if (getClockValue(opClockPos.getKey()).getValue() < opClockPos.getValue())
                 return false;
         return true;
     }
 
-    private void startExec(DataMessage msg, InetAddress source)
+    private void tryExecQueue(InetAddress source)
     {
-        if (msg.getvUp() != executingData.computeIfAbsent(source, k-> 0) + 1){
-            logger.error("Executing unexpected op {} {}", msg.getvUp(), executingData.get(source));
-            throw new AssertionError();
+        Queue<ProtoMessage> hostMetadata = pendingMetadata.get(source);
+        ProtoMessage peek = hostMetadata.peek();
+        boolean executed = true;
+        while (executed)
+        {
+            executed = false;
+            if (peek instanceof MetadataFlush) //MF message
+            {
+                MetadataFlush mf = (MetadataFlush) peek;
+                MutableInteger globalClockPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
+                MutableInteger executingClockPos = executing.computeIfAbsent(source, k -> new MutableInteger());
+                if (executingClockPos.getValue() == globalClockPos.getValue()) //Means every update has already finished
+                {
+                    hostMetadata.remove();
+                    //Can just update everything, nothing is pending
+                    Integer newClock = mf.getUpdates().get(source);
+                    executingClockPos.setValue(newClock);
+                    synchronized (globalClockPos)
+                    {
+                        globalClockPos.setValue(newClock);
+                        globalClockPos.notifyAll();
+                    }
+                    executed = true;
+                    pendingMetadata.keySet().forEach(this::tryExecQueue);
+                } //Else, we wait for the update to finish, and then apply the MF
+            }
+            else //Update message
+            {
+                UpdateNotification un = (UpdateNotification) peek;
+                Map<Integer, DataMessage> hostData = pendingData.get(source);
+                if (hostData.containsKey(un.getvUp()) && canExec(un.getVectorClock())) //Can exec mutation
+                {
+                    hostMetadata.remove();
+                    DataMessage data = hostData.remove(un.getvUp());
+                    MutableInteger executingClockPos = executing.computeIfAbsent(source, k -> new MutableInteger());
+                    if (data.getvUp() != executingClockPos.getValue() + 1)
+                    {
+                        logger.error("Executing unexpected op {} {}", data.getvUp(), executing.get(source));
+                        throw new AssertionError();
+                    }
+                    executingClockPos.setValue(data.getvUp());
+                    Stage.MUTATION.maybeExecuteImmediately(() -> { //This block will run on mutation threadpool
+                        try
+                        {
+                            data.getMutation().apply();
+                            //Once finished, "onMutationFinished" is called
+                            sendRequest(new MutationFinished(data, source), this.getProtoId());
+                        }
+                        catch (Exception e)
+                        {
+                            logger.error("Failed to apply remote mutation locally : ", e);
+                            throw new AssertionError(e);
+                        }
+                    });
+                    executed = true;
+                }
+            }
         }
-        executingData.put(source, executingData.get(source)+1);
-        Stage.MUTATION.maybeExecuteImmediately(() -> { //This block will run on mutation threadpool
-            try
-            {
-                msg.getMutation().apply();
-                sendRequest(new MutationFinished(msg, source), this.getProtoId());
-            }
-            catch (Exception e)
-            {
-                logger.error("Failed to apply remote mutation locally : ", e);
-                throw new AssertionError(e);
-            }
-        });
     }
 
     @Override
     void onMutationFinished(MutationFinished request, short sourceProto)
     {
         InetAddress source = request.getSource();
-        if(request.getMutationMessage().getvUp() != executingData.get(source) ||
-           request.getMutationMessage().getvUp() !=
-           StorageProxy.globalClock.computeIfAbsent(source, k-> new MutableInteger()).getValue()){
-            logger.error("Finished executed unexpected op {} {} {}", request.getMutationMessage().getvUp(),
-                         executingData.get(source), StorageProxy.globalClock.get(source));
-            throw new AssertionError();
-        }
-
-        int highestClock = request.getMutationMessage().getvUp(); //Store value to set in highestClock
-
-        //Exec following MF in this queue
-        Queue<ProtoMessage> protoMessages = pendingMetadata.get(source);
-        while(protoMessages.peek() instanceof MetadataFlush){
-            MetadataFlush mfMsg = (MetadataFlush) protoMessages.remove();
-            highestClock = mfMsg.getUpdates().get(source);
-        }
-
-        //Update clock, notifying waiting ops
-        MutableInteger cPos = StorageProxy.globalClock.computeIfAbsent(source, k-> new MutableInteger());
-        synchronized (cPos){
-            cPos.setValue(highestClock);
-            cPos.notifyAll();
-        }
-        executingData.put(source, highestClock);
-
-        //Check if can exec anything else
-        for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingMetadata.entrySet())
+        int vUp = request.getMutationMessage().getvUp();
+        MutableInteger cPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
+        PriorityQueue<Integer> ooo = outOfOrderExecuted.computeIfAbsent(source, k -> new PriorityQueue<>());
+        //If is next "executed" op, check for following finished ops and update clock
+        if (vUp == (cPos.getValue() + 1))
         {
-            InetAddress host = entry.getKey();
-            ProtoMessage nextMsg = entry.getValue().peek();
-            if(nextMsg instanceof UpdateNotification) {
-                if(canExec(((UpdateNotification) nextMsg).getVectorClock()) && pendingData.get(host).containsKey(((UpdateNotification) nextMsg).getvUp())){
-
-                }
+            int highestVUp = vUp;
+            while (!ooo.isEmpty() && (ooo.peek() == (highestVUp + 1)))
+            {
+                highestVUp = ooo.remove();
             }
-            //TODO...
+            //Update clock, notifying waiting ops
+            synchronized (cPos)
+            {
+                cPos.setValue(highestVUp);
+                cPos.notifyAll();
+            }
+            pendingMetadata.keySet().forEach(this::tryExecQueue);
         }
-        //TODO try to execute more operations (only update, never flush)
+        else //Else, just add to the outOfOrder struct
+        {
+            ooo.add(vUp);
+        }
     }
 
     @Override
     void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId)
     {
         InetAddress source = host.getAddress();
-        Queue<ProtoMessage> hostMetadata = pendingMetadata.get(source);
         Map<Integer, DataMessage> hostData = pendingData.get(source);
 
-        ProtoMessage peek = hostMetadata.peek();
-        if (peek == null) //Queue empty, no metadata
-        {
-            if (canExec(msg.getVectorClock()))
-                startExec(msg, source);
-            else
-                hostData.put(msg.getvUp(), msg);
-        }
-        else if (peek instanceof UpdateNotification)
-        {
-            UpdateNotification uN = (UpdateNotification) hostMetadata.peek();
-            if (uN.getvUp() == msg.getvUp())
-                if (canExec(msg.getVectorClock()))
-                {
-                    hostMetadata.remove();
-                    startExec(msg, source);
-                }
-                else
-                    hostData.put(msg.getvUp(), msg);
-            else if (uN.getvUp() < msg.getvUp())
-                hostData.put(msg.getvUp(), msg);
-            else
-            {
-                logger.error("Unexpected payload {} : {}", uN.getvUp(), msg.getvUp());
-                throw new AssertionError();
-            }
-        }
-        //If peek is metadataflush, do nothing. It means an operation is executing
+        hostData.put(msg.getvUp(), msg);
+        if (hostData.size() == 1) //If previous data is stil in map, means this is not the next update
+            tryExecQueue(source);
     }
 
     @Override
     void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId)
     {
-        //TODO for each entry
-        //TODO If queue empty, increase clock immediately, else add to queue
-        //TODO If executed, check queue to see if can execute more
+        for (InetAddress k : msg.getUpdates().keySet())
+        {
+            Queue<ProtoMessage> hostMetadata = pendingMetadata.get(k);
+            hostMetadata.add(msg);
+            if (hostMetadata.size() == 1)
+                tryExecQueue(k); //Will always exec
+        }
     }
 
     @Override
@@ -181,9 +187,14 @@ public class EngageProxy extends GenericProxy
     {
         onMetadataFlush(msg.getMf(), host, sourceProto, channelId);
 
-        //TODO if queue empty, try to execute - if fail, add to queue. if not empty, add to queue
-        //TODO if no data, cant execute.
-        //TODO If executed (executing?), ignore....
+        InetAddress source = host.getAddress();
+        Queue<ProtoMessage> hostMetadata = pendingMetadata.get(source);
+        if (executing.computeIfAbsent(source, k -> new MutableInteger()).getValue() < msg.getvUp())
+        {
+            hostMetadata.add(msg);
+            if (hostMetadata.size() == 1) //If previous metadata in queue, then no point trying anything
+                tryExecQueue(source);
+        } //If already executing, ignore message
     }
 
     @Override
@@ -214,8 +225,7 @@ public class EngageProxy extends GenericProxy
         try
         {
             String partition = mutation.getKeyspaceName();
-            UpdateNotification not = new UpdateNotification(GenericProxy.myAddr,
-                                                            vUp, partition, objectClock, null, null);
+            UpdateNotification not = new UpdateNotification(myAddr, vUp, partition, objectClock, null, null);
             sendMessage(not, null, clientChannel);
             DataMessage dataMessage = new DataMessage(mutation, objectClock, vUp);
             targets.get(partition).forEach(h -> sendMessage(dataMessage, h));

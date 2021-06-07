@@ -167,7 +167,6 @@ public class StorageProxy implements StorageProxyMBean
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=StorageProxy";
     public static final String UNREACHABLE = "UNREACHABLE";
     public static final StorageProxy instance = new StorageProxy();
-    public static final ConcurrentMap<InetAddress, MutableInteger> globalClock = new ConcurrentHashMap<>();
 
     private static final Logger logger = LoggerFactory.getLogger(StorageProxy.class);
     private static final WritePerformer standardWritePerformer;
@@ -191,6 +190,7 @@ public class StorageProxy implements StorageProxyMBean
     private static final boolean disableSerialReadLinearizability =
     Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
     public static int localCounter = 0;
+    public static final Object counterLock = new Object();
     private static volatile int maxHintsInProgress = 128 * FBUtilities.getAvailableProcessors();
 
     private StorageProxy()
@@ -1438,7 +1438,7 @@ public class StorageProxy implements StorageProxyMBean
         //Need to synchronized from counter++ until ship, to make sure ops are shipped in the correct order...
         long timestamp;
         int vUp;
-        synchronized (globalClock)
+        synchronized (counterLock)
         {
             vUp = ++localCounter;
             timestamp = FBUtilities.timestampMicros();
