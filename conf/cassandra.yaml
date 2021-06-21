@@ -9,7 +9,7 @@
 # one logical cluster from joining another.
 cluster_name: 'Test Cluster'
 
-replication_mode: 'bayou'
+protocol: 'bayou'
 #bayou, engage, edgegage, saturn
 peer_interface: 'br0'
 
@@ -666,7 +666,7 @@ listen_address: localhost
 
 # Set listen_address OR listen_interface, not both. Interfaces must correspond
 # to a single address, IP aliasing is not supported.
-# listen_interface: eth0
+#listen_interface: 'br0'
 
 # If you choose to specify the interface by name and the interface has an ipv4 and an ipv6 address
 # you can specify which should be chosen using listen_interface_prefer_ipv6. If false the first ipv4
@@ -746,11 +746,11 @@ native_transport_allow_older_protocols: true
 # set broadcast_rpc_address to a value other than 0.0.0.0.
 #
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
-rpc_address: localhost
+#rpc_address: localhost
 
 # Set rpc_address OR rpc_interface, not both. Interfaces must correspond
 # to a single address, IP aliasing is not supported.
-# rpc_interface: eth1
+rpc_interface: 'br0'
 
 # If you choose to specify the interface by name and the interface has an ipv4 and an ipv6 address
 # you can specify which should be chosen using rpc_interface_prefer_ipv6. If false the first ipv4

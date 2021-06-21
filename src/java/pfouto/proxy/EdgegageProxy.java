@@ -18,62 +18,311 @@
 
 package pfouto.proxy;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
+import pfouto.ImmutableInteger;
+import pfouto.MutableInteger;
 import pfouto.ipc.MutationFinished;
 import pfouto.messages.side.DataMessage;
 import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
-import pfouto.messages.up.UpdateNotification;
+import pfouto.messages.up.TargetsMessage;
+import pfouto.messages.up.UpdateNot;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 public class EdgegageProxy extends GenericProxy
 {
+    private static final Logger logger = LoggerFactory.getLogger(EdgegageProxy.class);
+
+    Map<InetAddress, Queue<ProtoMessage>> pendingData;
+
+    Map<InetAddress, MutableInteger> executing;
+    Map<InetAddress, PriorityQueue<Integer>> outOfOrderExecuted;
+
+    ConcurrentMap<InetAddress, MutableInteger> globalClock = new ConcurrentHashMap<>();
+
+
+    int localCounter = 0;
+    final Object counterLock = new Object();
 
     public EdgegageProxy()
     {
         super("EdgegageProxy");
+        pendingData = new HashMap<>();
+        executing = new HashMap<>();
+        outOfOrderExecuted = new HashMap<>();
+    }
+
+    private void tryExecQueue(InetAddress source)
+    {
+        Queue<ProtoMessage> hostData = pendingData.computeIfAbsent(source, k -> new LinkedList<>());
+        boolean executed = true;
+        boolean tryAll = false;
+        ProtoMessage peek;
+        while (executed && ((peek = hostData.peek()) != null))
+        {
+            executed = false;
+            if (peek instanceof MetadataFlush) //MF message
+            {
+                MetadataFlush mf = (MetadataFlush) peek;
+                MutableInteger globalClockPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
+                MutableInteger executingClockPos = executing.computeIfAbsent(source, k -> new MutableInteger());
+                if (executingClockPos.getValue() == globalClockPos.getValue()) //Means every update has already finished
+                {
+                    hostData.remove();
+                    //Can just update everything, nothing is pending
+                    Integer newClock = mf.getUpdates().get(source);
+                    executingClockPos.setValue(newClock);
+                    synchronized (globalClockPos)
+                    {
+                        globalClockPos.setValue(newClock);
+                        globalClockPos.notifyAll();
+                    }
+                    logger.debug("Executed metadata {} {}", source, newClock);
+                    executed = true;
+                    tryAll = true;
+                } //Else, we wait for the update to finish, and then apply the MF
+            }
+            else //Update message
+            {
+                UpdateNot un = (UpdateNot) peek;
+                if (canExec(un.getVectorClock())) //Can exec mutation
+                {
+                    hostData.remove();
+                    MutableInteger executingClockPos = executing.computeIfAbsent(source, k -> new MutableInteger());
+                    if (un.getvUp() != executingClockPos.getValue() + 1)
+                    {
+                        logger.error("Executing unexpected op {} {}", un.getvUp(), executing.get(source));
+                        throw new AssertionError();
+                    }
+                    executingClockPos.setValue(un.getvUp());
+                    Stage.MUTATION.maybeExecuteImmediately(() -> { //This block will run on mutation threadpool
+                        try
+                        {
+                            logger.debug("Starting data {} {}", source, un.getvUp());
+                            Mutation mutation = Mutation.serializer.deserialize(
+                            new DataInputBuffer(un.getData()), MessagingService.VERSION_40);
+                            mutation.apply();
+                            //Once finished, "onMutationFinished" is called
+                            sendRequest(new MutationFinished(un.getvUp(), source), this.getProtoId());
+                        }
+                        catch (Exception e)
+                        {
+                            logger.error("Failed to apply remote mutation locally : ", e);
+                            throw new AssertionError(e);
+                        }
+                    });
+                    executed = true;
+                }
+            }
+        }
+        if (tryAll)
+            pendingData.keySet().forEach(this::tryExecQueue);
     }
 
     @Override
     void onMutationFinished(MutationFinished request, short sourceProto)
     {
-
-    }
-
-    @Override
-    void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId)
-    {
-
+        InetAddress source = request.getSource();
+        int vUp = request.getvUp();
+        MutableInteger cPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
+        PriorityQueue<Integer> ooo = outOfOrderExecuted.computeIfAbsent(source, k -> new PriorityQueue<>());
+        //If is next "executed" op, check for following finished ops and update clock
+        if (vUp == (cPos.getValue() + 1))
+        {
+            int highestVUp = vUp;
+            while (!ooo.isEmpty() && (ooo.peek() == (highestVUp + 1)))
+            {
+                highestVUp = ooo.remove();
+            }
+            //Update clock, notifying waiting ops
+            synchronized (cPos)
+            {
+                cPos.setValue(highestVUp);
+                cPos.notifyAll();
+            }
+            logger.debug("Executed data {} {}", source, highestVUp);
+            pendingData.keySet().forEach(this::tryExecQueue);
+        }
+        else //Else, just add to the outOfOrder struct
+        {
+            ooo.add(vUp);
+        }
     }
 
     @Override
     void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId)
     {
-
+        logger.debug("{} received from {}", msg, host);
+        for (InetAddress k : msg.getUpdates().keySet())
+        {
+            Queue<ProtoMessage> hostMetadata = pendingData.computeIfAbsent(k, key -> new LinkedList<>());
+            hostMetadata.add(msg);
+            if (hostMetadata.size() == 1)
+                tryExecQueue(k); //Will always exec
+        }
     }
 
     @Override
-    void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId)
+    void onUpdateNotification(UpdateNot msg, Host host, short sourceProto, int channelId)
+    {
+        logger.debug("{} received from {}", msg, host);
+        if (msg.getMf() != null)
+            onMetadataFlush(msg.getMf(), host, sourceProto, channelId);
+
+        InetAddress source = msg.getSource();
+        Queue<ProtoMessage> hostMetadata = pendingData.computeIfAbsent(source, k -> new LinkedList<>());
+        hostMetadata.add(msg);
+        if (hostMetadata.size() == 1) //If previous metadata in queue, then no point trying anything
+            tryExecQueue(source);
+    }
+
+
+    @Override
+    void internalOnLogTimer()
+    {
+        logger.info("Clock {} {}", localCounter, globalClock);
+        pendingData.forEach((k, v) -> {
+            if (!v.isEmpty())
+            {
+                logger.info("Pending {}: {}", k, v.size());
+                logger.debug("First: " + v.peek());
+            }
+        });
+    }
+
+    @Override
+    public int parseAndShip(Mutation mutation, byte[] currentClockData, byte[] clientClockData, BufferCell clockCell)
+    {
+        try {
+            //Parse clocks
+            Clock clientClock, objectClock;
+            if (currentClockData != null) {
+                ByteArrayInputStream obais = new ByteArrayInputStream(currentClockData);
+                objectClock = Clock.fromInputStream(obais);
+                obais.close();
+            } else
+                objectClock = new Clock();
+
+            ByteArrayInputStream cbais = new ByteArrayInputStream(clientClockData);
+            clientClock = Clock.fromInputStream(cbais);
+            cbais.close();
+
+            //Update object clock
+            objectClock.merge(clientClock);
+            //Alter mutation with new clock
+            clockCell.setValue(objectClock.toBuffer().flip());
+
+            //Need to synchronized from counter++ until ship, to make sure ops are shipped in the correct order...
+            long timestamp;
+            int vUp;
+            synchronized (counterLock) {
+                vUp = ++localCounter;
+                timestamp = FBUtilities.timestampMicros();
+                clockCell.setTimestamp(timestamp);
+
+                logger.debug("Shipping and executing local {}", vUp);
+                String partition = mutation.getKeyspaceName();
+                DataOutputBuffer buffer = new DataOutputBuffer();
+                Mutation.serializer.serialize(mutation, buffer, MessagingService.VERSION_40);
+                byte[] dataData = buffer.getData();
+                UpdateNot not = new UpdateNot(myAddr, vUp, partition, objectClock, dataData, null);
+                sendMessage(clientChannel, not, null);
+            }
+            return vUp;
+        } catch (Exception e) {
+            logger.error("Exception in ship: " + e.getMessage());
+            throw new AssertionError(e);
+        }
+    }
+
+    @Override
+    public void blockUntil(ByteBuffer c)
+    {
+        Clock clientClock;
+        try {
+            clientClock = Clock.fromInputStream(new ByteArrayInputStream(c.array()));
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw new RuntimeException("Could not read client clock");
+        }
+
+        for (Map.Entry<Inet4Address, Integer> entry : clientClock.getValue().entrySet()) {
+            //ignore my own entry (will always be up-to-date)
+            Inet4Address key = entry.getKey();
+            if (key.equals(myAddr)) continue; //Ignore my own entry
+            Integer clientValue = entry.getValue();
+            ImmutableInteger localValue = getClockValue(key);
+            if (localValue.getValue() >= clientValue) continue; //If already satisfied, no need for locks
+            synchronized (localValue) {
+                while (localValue.getValue() < clientValue) {
+                    try {
+                        localValue.wait();
+                    } catch (InterruptedException ignored) { }
+                }
+            }
+        }
+    }
+
+    public ImmutableInteger getClockValue(InetAddress pos)
+    {
+        return globalClock.computeIfAbsent(pos, k -> new MutableInteger());
+    }
+
+    boolean canExec(Clock opClock)
+    {
+        for (Map.Entry<Inet4Address, Integer> opClockPos : opClock.getValue().entrySet())
+        {
+            if (!opClockPos.getKey().equals(myAddr) &&
+                getClockValue(opClockPos.getKey()).getValue() < opClockPos.getValue())
+                return false;
+        }
+        return true;
+    }
+
+    @Override
+    void internalInit()
     {
 
     }
 
     @Override
-    void onStabMessage(StabMessage msg, Host host, short sourceProto, int channelId)
+    void onDataMessage(DataMessage msg, Host from, short sourceProto, int channelId)
     {
-
+        throw new AssertionError("Unexpected message " + msg + " from " + from);
     }
 
     @Override
-    void createConnections()
+    void onStabMessage(StabMessage msg, Host from, short sourceProto, int channelId)
     {
-
+        throw new AssertionError("Unexpected message " + msg + " from " + from);
     }
 
     @Override
-    public void ship(Mutation mutation, Clock objectClock, int vUp)
+    void createConnections(TargetsMessage tm)
     {
-
     }
 }

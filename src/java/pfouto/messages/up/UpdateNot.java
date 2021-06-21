@@ -19,27 +19,22 @@
 package pfouto.messages.up;
 
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.util.Arrays;
 
 import io.netty.buffer.ByteBuf;
-import jnr.ffi.annotations.Meta;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import pfouto.Clock;
 import pfouto.Utils;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
-public class UpdateNotification extends ProtoMessage
+public class UpdateNot extends ProtoMessage
 {
     public static final short MSG_ID = 202;
-    public static final ISerializer<UpdateNotification> serializer = new ISerializer<UpdateNotification>()
+    public static final ISerializer<UpdateNot> serializer = new ISerializer<UpdateNot>()
     {
         @Override
-        public void serialize(UpdateNotification msg, ByteBuf out) throws IOException
+        public void serialize(UpdateNot msg, ByteBuf out) throws IOException
         {
             out.writeBytes(msg.source.getAddress());
             out.writeInt(msg.vUp);
@@ -60,7 +55,7 @@ public class UpdateNotification extends ProtoMessage
         }
 
         @Override
-        public UpdateNotification deserialize(ByteBuf in) throws IOException
+        public UpdateNot deserialize(ByteBuf in) throws IOException
         {
             byte[] addrBytes = new byte[4];
             in.readBytes(addrBytes);
@@ -77,9 +72,10 @@ public class UpdateNotification extends ProtoMessage
             boolean mfPresent = in.readBoolean();
             if(mfPresent) mf = MetadataFlush.serializer.deserialize(in);
             else mf = null;
-            return new UpdateNotification(InetAddress.getByAddress(addrBytes), vUp, partition, clock, data, mf);
+            return new UpdateNot(InetAddress.getByAddress(addrBytes), vUp, partition, clock, data, mf);
         }
     };
+
     private final InetAddress source;
     private final int vUp;
     private final String partition;
@@ -87,7 +83,7 @@ public class UpdateNotification extends ProtoMessage
     private final byte[] data;
     private final MetadataFlush mf;
 
-    public UpdateNotification(InetAddress source, int vUp, String partition, Clock vectorClock, byte[] data, MetadataFlush mf)
+    public UpdateNot(InetAddress source, int vUp, String partition, Clock vectorClock, byte[] data, MetadataFlush mf)
     {
         super(MSG_ID);
         this.source = source;
@@ -126,5 +122,18 @@ public class UpdateNotification extends ProtoMessage
     public MetadataFlush getMf()
     {
         return mf;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "UpdateNot{" +
+               "source=" + source +
+               ", vUp=" + vUp +
+               ", partition='" + partition + '\'' +
+               ", vectorClock=" + vectorClock +
+               ", data=" + Arrays.toString(data) +
+               ", mf=" + mf +
+               '}';
     }
 }

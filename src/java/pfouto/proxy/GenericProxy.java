@@ -19,7 +19,10 @@
 package pfouto.proxy;
 
 import java.io.IOException;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +37,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.service.CassandraDaemon;
+import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
 import pfouto.ImmutableInteger;
@@ -44,7 +49,8 @@ import pfouto.messages.side.DataMessage;
 import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
 import pfouto.messages.up.TargetsMessage;
-import pfouto.messages.up.UpdateNotification;
+import pfouto.messages.up.UpdateNot;
+import pfouto.timers.LogTimer;
 import pfouto.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -70,11 +76,10 @@ public abstract class GenericProxy extends GenericProtocol
 
     public static final GenericProxy instance;
     public static final InetAddress myAddr;
-    private static final ReplicationMode replicationMode;
+    public static final Protocol protocol;
     private static final Config conf;
 
     private static final Logger logger = LoggerFactory.getLogger(GenericProxy.class);
-    final ConcurrentMap<InetAddress, MutableInteger> globalClock;
     int clientChannel;
     int peerChannel;
     Map<String, List<Host>> targets;
@@ -83,13 +88,10 @@ public abstract class GenericProxy extends GenericProtocol
     public GenericProxy(String name)
     {
         super(name, (short) 100);
-        globalClock = new ConcurrentHashMap<>();
+        targets = new HashMap<>();
     }
 
-    public ImmutableInteger getClockValue(InetAddress pos)
-    {
-        return globalClock.computeIfAbsent(pos, k -> new MutableInteger());
-    }
+    public abstract void blockUntil(ByteBuffer c);
 
     @Override
     public void init(Properties properties) throws HandlerRegistrationException, IOException
@@ -97,6 +99,7 @@ public abstract class GenericProxy extends GenericProtocol
         try
         {
             registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
+            registerTimerHandler(LogTimer.TIMER_ID, this::onLogTimer);
             {
                 logger.info("GenericProxy connecting to metadata service");
                 Properties clientProps = new Properties();
@@ -112,16 +115,18 @@ public abstract class GenericProxy extends GenericProtocol
                 registerMessageHandler(clientChannel, TargetsMessage.MSG_ID, this::uponTargetsMessage);
                 registerMessageSerializer(clientChannel, MetadataFlush.MSG_ID, MetadataFlush.serializer);
                 registerMessageHandler(clientChannel, MetadataFlush.MSG_ID, this::onMetadataFlush);
-                registerMessageSerializer(clientChannel, UpdateNotification.MSG_ID, UpdateNotification.serializer);
-                registerMessageHandler(clientChannel, UpdateNotification.MSG_ID, this::onUpdateNotification, this::onMessageFailed);
+                registerMessageSerializer(clientChannel, UpdateNot.MSG_ID, UpdateNot.serializer);
+                registerMessageHandler(clientChannel, UpdateNot.MSG_ID, this::onUpdateNotification, this::onMessageFailed);
 
                 openConnection(null, clientChannel);
             }
 
-            if (replicationMode != ReplicationMode.edgegage)
+            if (protocol != Protocol.edgegage)
             {
                 logger.info("GenericProxy creating peer channel");
-                InetAddress peerAddr = DatabaseDescriptor.getNetworkInterfaceAddress(conf.peer_interface, "peer_interface", false);
+                InetAddress peerAddr = DatabaseDescriptor
+                                       .getNetworkInterfaceAddress(conf.peer_interface,
+                                                                   "peer_interface", false);
                 Properties peerProps = new Properties();
                 peerProps.put(TCPChannel.ADDRESS_KEY, peerAddr.getHostAddress());
                 peerProps.put(TCPChannel.PORT_KEY, ENGAGE_PEER_PORT);
@@ -141,6 +146,9 @@ public abstract class GenericProxy extends GenericProtocol
             }
 
             registerRequestHandler(MutationFinished.REQ_ID, this::onMutationFinished);
+
+            setupPeriodicTimer(new LogTimer(), 5000, 5000);
+            internalInit();
         }
         catch (Exception e)
         {
@@ -149,13 +157,15 @@ public abstract class GenericProxy extends GenericProtocol
         }
     }
 
+    abstract void internalInit() throws HandlerRegistrationException;
+
     abstract void onMutationFinished(MutationFinished request, short sourceProto);
 
     abstract void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId);
 
     abstract void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId);
 
-    abstract void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId);
+    abstract void onUpdateNotification(UpdateNot msg, Host host, short sourceProto, int channelId);
 
     abstract void onStabMessage(StabMessage msg, Host host, short sourceProto, int channelId);
 
@@ -181,14 +191,14 @@ public abstract class GenericProxy extends GenericProtocol
         }
         catch (Exception e)
         {
-            logger.error("Error parsing targets message: " + e.getLocalizedMessage());
+            logger.error("Error parsing targets message: ", e);
             CassandraDaemon.stop(null);
         }
 
-        createConnections();
+        createConnections(msg);
     }
 
-    abstract void createConnections();
+    abstract void createConnections(TargetsMessage tm);
 
     private void onOutConnectionUp(OutConnectionUp event, int channelId)
     {
@@ -207,11 +217,17 @@ public abstract class GenericProxy extends GenericProtocol
         logger.info("Reconnecting out to " + timer.getNode());
         openConnection(timer.getNode(), peerChannel);
     }
-
-    private void onOutConnectionDown(OutConnectionDown event, int channelId)
+    private void onLogTimer(LogTimer timer, long uId)
     {
-        logger.warn("Lost connection out to " + event.getNode() + ", reconnecting in " + RECONNECT_INTERVAL);
-        setupTimer(new ReconnectTimer(event.getNode()), RECONNECT_INTERVAL);
+        internalOnLogTimer();
+    }
+
+    abstract void internalOnLogTimer();
+
+    private void onOutConnectionDown(OutConnectionDown ev, int channelId)
+    {
+        logger.warn("Lost connection out to {} ({}), reconnecting in {}", ev.getNode(), ev.getCause(), RECONNECT_INTERVAL);
+        setupTimer(new ReconnectTimer(ev.getNode()), RECONNECT_INTERVAL);
     }
 
     private void onInConnectionUp(InConnectionUp event, int channelId)
@@ -221,7 +237,7 @@ public abstract class GenericProxy extends GenericProtocol
 
     private void onInConnectionDown(InConnectionDown event, int channelId)
     {
-        logger.warn("Connection in down from " + event.getNode());
+        logger.warn("Connection in down from {} ({})", event.getNode(), event.getCause());
     }
 
     private void onServerFailed(ServerFailedEvent event, int i)
@@ -241,17 +257,18 @@ public abstract class GenericProxy extends GenericProtocol
         logger.info("Connected to server");
     }
 
-    public abstract void ship(Mutation mutation, Clock objectClock, int vUp);
+    public abstract int parseAndShip(Mutation mutation, byte[] currentClockData,
+                                     byte[] clientClockData, BufferCell clockCell);
 
-    private enum ReplicationMode
+    public enum Protocol
     {bayou, saturn, edgegage, engage}
 
     static
     {
         conf = DatabaseDescriptor.getRawConfig();
-        replicationMode = ReplicationMode.valueOf(conf.replication_mode);
-        myAddr = FBUtilities.getJustBroadcastAddress();
-        switch (replicationMode)
+        protocol = Protocol.valueOf(conf.protocol);
+        myAddr = FBUtilities.getJustBroadcastNativeAddress();
+        switch (protocol)
         {
             case bayou:
                 instance = new BayouProxy();

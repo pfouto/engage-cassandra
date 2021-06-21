@@ -48,6 +48,7 @@ public class TargetsMessage extends ProtoMessage
             });
             out.writeInt(msg.getAll().size());
             msg.getAll().forEach(h -> Utils.serializeString(h, out));
+            out.writeInt(msg.bayouStabMs);
         }
 
         @Override
@@ -72,17 +73,20 @@ public class TargetsMessage extends ProtoMessage
             {
                 all.add(Utils.deserializeString(in));
             }
-            return new TargetsMessage(map, all);
+            int bayouStabMs = in.readInt();
+            return new TargetsMessage(map, all, bayouStabMs);
         }
     };
     private final Map<String, List<String>> map;
     private final Set<String> all;
+    private final int bayouStabMs;
 
-    public TargetsMessage(Map<String, List<String>> map, Set<String> all)
+    public TargetsMessage(Map<String, List<String>> map, Set<String> all, int bayouStabMs)
     {
         super(MSG_ID);
         this.map = map;
         this.all = all;
+        this.bayouStabMs = bayouStabMs;
     }
 
     public Map<String, List<String>> getMap()
@@ -95,12 +99,18 @@ public class TargetsMessage extends ProtoMessage
         return all;
     }
 
+    public int getBayouStabMs()
+    {
+        return bayouStabMs;
+    }
+
     @Override
     public String toString()
     {
         return "TargetsMessage{" +
                "map=" + map +
                ", all=" + all +
+               ", bayouStabMs=" + bayouStabMs +
                '}';
     }
 }

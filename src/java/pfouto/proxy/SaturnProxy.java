@@ -18,61 +18,297 @@
 
 package pfouto.proxy;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.nio.ByteBuffer;
+import java.util.AbstractMap;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
+import pfouto.ImmutableInteger;
+import pfouto.MutableInteger;
 import pfouto.ipc.MutationFinished;
 import pfouto.messages.side.DataMessage;
 import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
-import pfouto.messages.up.UpdateNotification;
+import pfouto.messages.up.TargetsMessage;
+import pfouto.messages.up.UpdateNot;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 public class SaturnProxy extends GenericProxy
 {
+    private static final Logger logger = LoggerFactory.getLogger(SaturnProxy.class);
+    final Object counterLock = new Object();
+    ConcurrentMap<InetAddress, MutableInteger> remoteTimestamps = new ConcurrentHashMap<>();
+    int localCounter = 0;
+    int executing = 0;
+
+    Queue<UpdateNot> pendingMetadata;
+    Map<InetAddress, Map<Integer, DataMessage>> pendingData;
+
+    Map.Entry<InetAddress, Integer> lastExec;
+
+    Set<Host> peers = new HashSet<>();
+
     public SaturnProxy()
     {
         super("SaturnProxy");
+        pendingMetadata = new LinkedList<>();
+        pendingData = new HashMap<>();
+        lastExec = new AbstractMap.SimpleEntry<>(myAddr, -1);
+    }
+
+    private boolean smaller(Inet4Address adr1, Inet4Address adr2)
+    {
+        byte[] ba1 = adr1.getAddress();
+        byte[] ba2 = adr2.getAddress();
+
+        // we have 2 ips of the same type, so we have to compare each byte
+        for (int i = 0; i < ba1.length; i++)
+        {
+            int b1 = unsignedByteToInt(ba1[i]);
+            int b2 = unsignedByteToInt(ba2[i]);
+            if (b1 != b2) return b1 < b2;
+        }
+        return false;
+    }
+
+    private int unsignedByteToInt(byte b)
+    {
+        return (int) b & 0xFF;
+    }
+
+    private boolean smallerLabel(InetAddress addr, int vUp)
+    {
+        return vUp < lastExec.getValue() ||
+               (vUp == lastExec.getValue() && smaller((Inet4Address) addr, (Inet4Address) lastExec.getKey()));
     }
 
     @Override
     void onMutationFinished(MutationFinished request, short sourceProto)
     {
+        executing--;
+        MutableInteger value = remoteTimestamps.computeIfAbsent(request.getSource(), k -> new MutableInteger());
+        synchronized (value)
+        {
+            value.setValue(Math.max(value.getValue(), request.getvUp()));
+            value.notifyAll();
+        }
+        tryExecNext();
+    }
 
+    private void tryExecNext()
+    {
+        boolean executed = true;
+        while (executed)
+        {
+            executed = false;
+            UpdateNot not = pendingMetadata.peek();
+            if (not == null) break;
+            Map<Integer, DataMessage> hostData = pendingData.computeIfAbsent(not.getSource(), k -> new HashMap<>());
+            if (hostData.containsKey(not.getvUp()) && (executing == 0 || smallerLabel(not.getSource(), not.getvUp())))
+            {
+                executing++;
+                synchronized (counterLock)
+                {
+                    localCounter = Math.max(localCounter, not.getvUp());
+                }
+                lastExec = new AbstractMap.SimpleEntry<>(not.getSource(), not.getvUp());
+
+                pendingMetadata.remove();
+                DataMessage remove = hostData.remove(not.getvUp());
+
+                Stage.MUTATION.maybeExecuteImmediately(() -> { //This block will run on mutation threadpool
+                    try
+                    {
+                        remove.getMutation().apply();
+                        //Once finished, "onMutationFinished" is called
+                        sendRequest(new MutationFinished(not.getvUp(), not.getSource()), this.getProtoId());
+                    }
+                    catch (Exception e)
+                    {
+                        logger.error("Failed to apply remote mutation locally : ", e);
+                        throw new AssertionError(e);
+                    }
+                });
+                executed = true;
+            }
+        }
+    }
+
+    @Override
+    void onUpdateNotification(UpdateNot msg, Host host, short sourceProto, int channelId)
+    {
+        logger.debug("{} received from {}", msg, host);
+        pendingMetadata.add(msg);
+        if (pendingMetadata.size() == 1) //If previous metadata in queue, then no point trying anything
+            tryExecNext();
     }
 
     @Override
     void onDataMessage(DataMessage msg, Host host, short sourceProto, int channelId)
     {
+        logger.debug("{} received from {}", msg, host);
+        InetAddress source = host.getAddress();
+        Map<Integer, DataMessage> hostData = pendingData.computeIfAbsent(source, k -> new HashMap<>());
 
+        hostData.put(msg.getvUp(), msg);
+        tryExecNext();
+    }
+
+
+    @Override
+    void createConnections(TargetsMessage tm)
+    {
+        for (Map.Entry<String, List<Host>> entry : targets.entrySet())
+            for (Host h : entry.getValue())
+                if (peers.add(h))
+                    openConnection(h, peerChannel);
     }
 
     @Override
-    void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId)
+    void internalOnLogTimer()
     {
-
+        logger.info("Clock {} {}", localCounter, remoteTimestamps);
+        if (!pendingMetadata.isEmpty())
+            logger.info("PendingMetadata {}: {}", pendingMetadata.size(), pendingMetadata.peek());
+        pendingData.forEach((k, v) -> {
+            if (!v.isEmpty())
+                logger.info("PendingData {}: {}", k, v.size());
+        });
     }
 
     @Override
-    void onUpdateNotification(UpdateNotification msg, Host host, short sourceProto, int channelId)
+    public int parseAndShip(Mutation mutation, byte[] currentClockData, byte[] clientClockData, BufferCell clockCell)
     {
+        try
+        {
+            //Parse clocks
+            ByteArrayInputStream cbais = new ByteArrayInputStream(clientClockData);
+            Map.Entry<Inet4Address, Integer> clientClock = entryFromInputStream(cbais);
+            cbais.close();
 
+            //Alter mutation with new clock
+            clockCell.setValue(entryToBuffer(clientClock).flip());
+            //Need to synchronized from counter++ until ship, to make sure ops are shipped in the correct order...
+            long timestamp;
+            int vUp;
+            synchronized (counterLock)
+            {
+                vUp = ++localCounter;
+                timestamp = FBUtilities.timestampMicros();
+                clockCell.setTimestamp(timestamp);
+
+                logger.debug("Shipping and executing local {}", vUp);
+                String partition = mutation.getKeyspaceName();
+                UpdateNot not = new UpdateNot(myAddr, vUp, partition, new Clock(), null, null);
+                sendMessage(clientChannel, not, null);
+                DataMessage dataMessage = new DataMessage(mutation, new Clock(), vUp);
+                if(partition.equals("migration"))
+                    peers.forEach(h -> sendMessage(peerChannel, dataMessage, h));
+                else
+                    targets.get(partition).forEach(h -> sendMessage(peerChannel, dataMessage, h));
+            }
+            return vUp;
+        }
+        catch (Exception e)
+        {
+            logger.error("Exception in ship: " + e.getMessage());
+            e.printStackTrace();
+            throw new AssertionError(e);
+        }
+    }
+
+    @Override
+    public void blockUntil(ByteBuffer c)
+    {
+        Map.Entry<Inet4Address, Integer> clientEntry;
+        try
+        {
+            clientEntry = entryFromInputStream(new ByteArrayInputStream(c.array()));
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+            throw new RuntimeException("Could not read client clock");
+        }
+
+        if (clientEntry.getKey().equals(myAddr)) return;
+        ImmutableInteger localValue = getRemoteTimestamp(clientEntry.getKey());
+        if (localValue.getValue() >= clientEntry.getValue()) return;
+        synchronized (localValue)
+        {
+            while (localValue.getValue() < clientEntry.getValue())
+            {
+                try
+                {
+                    localValue.wait();
+                }
+                catch (InterruptedException ignored)
+                {
+                }
+            }
+        }
+    }
+
+    private ImmutableInteger getRemoteTimestamp(InetAddress pos)
+    {
+        return remoteTimestamps.computeIfAbsent(pos, k -> new MutableInteger());
+    }
+
+    private Map.Entry<Inet4Address, Integer> entryFromInputStream(InputStream data) throws IOException
+    {
+        try (DataInputStream dis = new DataInputStream(data))
+        {
+            Inet4Address addr = (Inet4Address) Inet4Address.getByAddress(dis.readNBytes(4));
+            int val = dis.readInt();
+            return new AbstractMap.SimpleEntry<>(addr, val);
+        }
+    }
+
+    private ByteBuffer entryToBuffer(Map.Entry<Inet4Address, Integer> entry)
+    {
+        ByteBuffer allocate = ByteBuffer.allocate(8);
+        allocate.put(entry.getKey().getAddress());
+        allocate.putInt(entry.getValue());
+        return allocate;
     }
 
     @Override
     void onStabMessage(StabMessage msg, Host host, short sourceProto, int channelId)
     {
-
+        throw new AssertionError("Unexpected message " + msg + " from " + host);
     }
 
     @Override
-    void createConnections()
+    void onMetadataFlush(MetadataFlush msg, Host host, short sourceProto, int channelId)
     {
-
+        throw new AssertionError("Unexpected message " + msg + " from " + host);
     }
 
     @Override
-    public void ship(Mutation mutation, Clock objectClock, int vUp)
+    void internalInit()
     {
-
     }
 }

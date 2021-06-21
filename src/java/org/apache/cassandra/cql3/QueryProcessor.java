@@ -545,35 +545,10 @@ public class QueryProcessor implements QueryHandler
         }
 
         /* pfouto s */
-        Clock clientClock;
-        try
-        {
-            clientClock = Clock.fromInputStream(new ByteArrayInputStream(customPayload.get("c").array()));
-        }
-        catch (IOException e)
-        {
-            e.printStackTrace();
-            throw new RuntimeException("Could not read client clock");
-        }
-
-        for (Map.Entry<Inet4Address, Integer> entry : clientClock.getValue().entrySet())
-        {
-            //ignore my own entry (will always be up-to-date)
-            Inet4Address key = entry.getKey();
-            if(key.equals(GenericProxy.myAddr)) continue; //Ignore my own entry
-            Integer clientValue = entry.getValue();
-            ImmutableInteger localValue = GenericProxy.instance.getClockValue(key);
-            if (localValue.getValue() >= clientValue) continue; //If already satisfied, no need for locks
-            synchronized (localValue)
-            {
-                while (localValue.getValue() < clientValue) {
-                    try { localValue.wait(); }
-                    catch (InterruptedException ignored) { }
-                }
-            }
+        if (customPayload.containsKey("c")) {
+            GenericProxy.instance.blockUntil(customPayload.get("c"));
         }
         /* pfouto e */
-
         metrics.preparedStatementsExecuted.inc();
         return processStatement(statement, queryState, options, queryStartNanoTime);
     }

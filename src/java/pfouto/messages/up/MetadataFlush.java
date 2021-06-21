@@ -72,4 +72,11 @@ public class MetadataFlush extends ProtoMessage
         return updates;
     }
 
+    @Override
+    public String toString()
+    {
+        return "MetadataFlush{" +
+               "updates=" + updates +
+               '}';
+    }
 }

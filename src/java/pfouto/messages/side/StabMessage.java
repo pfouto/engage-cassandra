@@ -56,6 +56,11 @@ public class StabMessage extends ProtoMessage
         this.vUp = vUp;
     }
 
+    public int getvUp()
+    {
+        return vUp;
+    }
+
     @Override
     public String toString()
     {

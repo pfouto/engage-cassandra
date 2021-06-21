@@ -16,37 +16,24 @@
  * limitations under the License.
  */
 
-package pfouto;
+package pfouto.timers;
 
-public class MutableInteger implements ImmutableInteger
+import pt.unl.fct.di.novasys.babel.generic.ProtoTimer;
+import pt.unl.fct.di.novasys.network.data.Host;
+
+public class LogTimer extends ProtoTimer
 {
+    public static final short TIMER_ID = 102;
 
-    private int value;
-
-    public MutableInteger(int initialValue)
+    public LogTimer()
     {
-        this.value = initialValue;
-    }
-
-    public MutableInteger()
-    {
-        this(0);
+        super(TIMER_ID);
     }
 
     @Override
-    public int getValue()
+    public ProtoTimer clone()
     {
-        return value;
+        return this;
     }
 
-    public void setValue(int value)
-    {
-        this.value = value;
-    }
-
-    @Override
-    public String toString()
-    {
-        return "MI{" + value + '}';
-    }
 }

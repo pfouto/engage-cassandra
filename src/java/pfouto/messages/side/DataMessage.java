@@ -20,12 +20,16 @@ package pfouto.messages.side;
 
 import java.io.IOException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import pfouto.Clock;
+import pfouto.proxy.EngageProxy;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
@@ -33,12 +37,18 @@ public class DataMessage extends ProtoMessage
 {
     public static final short MSG_ID = 101;
 
+    private static final Logger logger = LoggerFactory.getLogger(DataMessage.class);
+
     public static ISerializer<DataMessage> serializer = new ISerializer<DataMessage>()
     {
         @Override
         public void serialize(DataMessage dataMessage, ByteBuf byteBuf) throws IOException
         {
-            Mutation.serializer.serialize(dataMessage.mutation, new DataOutputBuffer(byteBuf.nioBuffer()), MessagingService.VERSION_40);
+            DataOutputBuffer buffer = new DataOutputBuffer();
+            Mutation.serializer.serialize(dataMessage.mutation, buffer, MessagingService.VERSION_40);
+            byte[] dataData = buffer.getData();
+            byteBuf.writeInt(dataData.length);
+            byteBuf.writeBytes(dataData);
             Clock.serializer.serialize(dataMessage.vectorClock, byteBuf);
             byteBuf.writeInt(dataMessage.vUp);
         }
@@ -46,7 +56,10 @@ public class DataMessage extends ProtoMessage
         @Override
         public DataMessage deserialize(ByteBuf byteBuf) throws IOException
         {
-            Mutation deserialize = Mutation.serializer.deserialize(new DataInputBuffer(byteBuf.nioBuffer(), false), MessagingService.VERSION_40);
+            int dataSize = byteBuf.readInt();
+            byte[] dataData = new byte[dataSize];
+            byteBuf.readBytes(dataData);
+            Mutation deserialize = Mutation.serializer.deserialize(new DataInputBuffer(dataData), MessagingService.VERSION_40);
             Clock clock = Clock.serializer.deserialize(byteBuf);
             int vUp = byteBuf.readInt();
             return new DataMessage(deserialize, clock, vUp);

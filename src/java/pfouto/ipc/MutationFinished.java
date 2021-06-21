@@ -27,19 +27,19 @@ public class MutationFinished extends ProtoRequest
 {
     public static final short REQ_ID = 101;
 
-    private final DataMessage mutationMessage;
+    private final int vUp;
     private final InetAddress source;
 
-    public MutationFinished(DataMessage mutationMessage, InetAddress source)
+    public MutationFinished(int vUp, InetAddress source)
     {
         super(REQ_ID);
-        this.mutationMessage = mutationMessage;
+        this.vUp = vUp;
         this.source = source;
     }
 
-    public DataMessage getMutationMessage()
+    public int getvUp()
     {
-        return mutationMessage;
+        return vUp;
     }
 
     public InetAddress getSource()

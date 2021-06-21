@@ -22,6 +22,7 @@ import java.util.*;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.ArrayUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,6 +93,14 @@ public final class CreateTableStatement extends AlterSchemaStatement
         this.useCompactStorage = useCompactStorage;
     }
 
+    public static TableMetadata.Builder parse(String cql, String keyspace)
+    {
+        return CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE")
+                                .keyspace(keyspace)
+                                .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
+                                .builder(Types.none());
+    }
+
     public Keyspaces apply(Keyspaces schema)
     {
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
@@ -156,16 +165,16 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
         // check for nested non-frozen UDTs or collections in a non-frozen UDT
         columns.forEach((column, type) ->
-        {
-            if (type.isUDT() && type.getType().isMultiCell())
-            {
-                ((UserType) type.getType()).fieldTypes().forEach(field ->
-                {
-                    if (field.isMultiCell())
-                        throw ire("Non-frozen UDTs with nested non-frozen collections are not supported");
-                });
-            }
-        });
+                        {
+                            if (type.isUDT() && type.getType().isMultiCell())
+                            {
+                                ((UserType) type.getType()).fieldTypes().forEach(field ->
+                                                                                 {
+                                                                                     if (field.isMultiCell())
+                                                                                         throw ire("Non-frozen UDTs with nested non-frozen collections are not supported");
+                                                                                 });
+                            }
+                        });
 
         /*
          * Deal with PRIMARY KEY columns
@@ -173,47 +182,47 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
         HashSet<ColumnIdentifier> primaryKeyColumns = new HashSet<>();
         concat(partitionKeyColumns, clusteringColumns).forEach(column ->
-        {
-            CQL3Type type = columns.get(column);
-            if (null == type)
-                throw ire("Unknown column '%s' referenced in PRIMARY KEY for table '%s'", column, tableName);
+                                                               {
+                                                                   CQL3Type type = columns.get(column);
+                                                                   if (null == type)
+                                                                       throw ire("Unknown column '%s' referenced in PRIMARY KEY for table '%s'", column, tableName);
 
-            if (!primaryKeyColumns.add(column))
-                throw ire("Duplicate column '%s' in PRIMARY KEY clause for table '%s'", column, tableName);
+                                                                   if (!primaryKeyColumns.add(column))
+                                                                       throw ire("Duplicate column '%s' in PRIMARY KEY clause for table '%s'", column, tableName);
 
-            if (type.getType().isMultiCell())
-            {
-                if (type.isCollection())
-                    throw ire("Invalid non-frozen collection type %s for PRIMARY KEY column '%s'", type, column);
-                else
-                    throw ire("Invalid non-frozen user-defined type %s for PRIMARY KEY column '%s'", type, column);
-            }
+                                                                   if (type.getType().isMultiCell())
+                                                                   {
+                                                                       if (type.isCollection())
+                                                                           throw ire("Invalid non-frozen collection type %s for PRIMARY KEY column '%s'", type, column);
+                                                                       else
+                                                                           throw ire("Invalid non-frozen user-defined type %s for PRIMARY KEY column '%s'", type, column);
+                                                                   }
 
-            if (type.getType().isCounter())
-                throw ire("counter type is not supported for PRIMARY KEY column '%s'", column);
+                                                                   if (type.getType().isCounter())
+                                                                       throw ire("counter type is not supported for PRIMARY KEY column '%s'", column);
 
-            if (type.getType().referencesDuration())
-                throw ire("duration type is not supported for PRIMARY KEY column '%s'", column);
+                                                                   if (type.getType().referencesDuration())
+                                                                       throw ire("duration type is not supported for PRIMARY KEY column '%s'", column);
 
-            if (staticColumns.contains(column))
-                throw ire("Static column '%s' cannot be part of the PRIMARY KEY", column);
-        });
+                                                                   if (staticColumns.contains(column))
+                                                                       throw ire("Static column '%s' cannot be part of the PRIMARY KEY", column);
+                                                               });
 
         List<AbstractType<?>> partitionKeyTypes = new ArrayList<>();
         List<AbstractType<?>> clusteringTypes = new ArrayList<>();
 
         partitionKeyColumns.forEach(column ->
-        {
-            CQL3Type type = columns.remove(column);
-            partitionKeyTypes.add(type.getType());
-        });
+                                    {
+                                        CQL3Type type = columns.remove(column);
+                                        partitionKeyTypes.add(type.getType());
+                                    });
 
         clusteringColumns.forEach(column ->
-        {
-            CQL3Type type = columns.remove(column);
-            boolean reverse = !clusteringOrder.getOrDefault(column, true);
-            clusteringTypes.add(reverse ? ReversedType.getInstance(type.getType()) : type.getType());
-        });
+                                  {
+                                      CQL3Type type = columns.remove(column);
+                                      boolean reverse = !clusteringOrder.getOrDefault(column, true);
+                                      clusteringTypes.add(reverse ? ReversedType.getInstance(type.getType()) : type.getType());
+                                  });
 
         if (clusteringOrder.size() > clusteringColumns.size())
             throw ire("Only clustering columns can be defined in CLUSTERING ORDER directive");
@@ -264,8 +273,10 @@ public final class CreateTableStatement extends AlterSchemaStatement
          * Create the builder
          */
 
-        TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, tableName);
-
+        /*pfouto s - made table ids deterministic*/
+        //TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, tableName);
+        TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(UUID.nameUUIDFromBytes(ArrayUtils.addAll(keyspaceName.getBytes(), tableName.getBytes()))));
+        /*pfouto e*/
         if (attrs.hasProperty(TableAttributes.ID))
             builder.id(attrs.getId());
 
@@ -421,28 +432,17 @@ public final class CreateTableStatement extends AlterSchemaStatement
         }
     }
 
-    public static TableMetadata.Builder parse(String cql, String keyspace)
-    {
-        return CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE")
-                                .keyspace(keyspace)
-                                .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
-                                .builder(Types.none());
-    }
-
     public final static class Raw extends CQLStatement.Raw
     {
+        public final TableAttributes attrs = new TableAttributes();
         private final QualifiedName name;
         private final boolean ifNotExists;
-
-        private boolean useCompactStorage = false;
         private final Map<ColumnIdentifier, CQL3Type.Raw> rawColumns = new HashMap<>();
         private final Set<ColumnIdentifier> staticColumns = new HashSet<>();
         private final List<ColumnIdentifier> clusteringColumns = new ArrayList<>();
-
-        private List<ColumnIdentifier> partitionKeyColumns;
-
         private final LinkedHashMap<ColumnIdentifier, Boolean> clusteringOrder = new LinkedHashMap<>();
-        public final TableAttributes attrs = new TableAttributes();
+        private boolean useCompactStorage = false;
+        private List<ColumnIdentifier> partitionKeyColumns;
 
         public Raw(QualifiedName name, boolean ifNotExists)
         {

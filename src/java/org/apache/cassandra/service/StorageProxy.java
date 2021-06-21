@@ -19,8 +19,6 @@ package org.apache.cassandra.service;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,7 +34,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
@@ -147,7 +144,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 import pfouto.Clock;
 import pfouto.proxy.GenericProxy;
-import pfouto.MutableInteger;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -189,8 +185,6 @@ public class StorageProxy implements StorageProxyMBean
     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
     private static final boolean disableSerialReadLinearizability =
     Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
-    public static int localCounter = 0;
-    public static final Object counterLock = new Object();
     private static volatile int maxHintsInProgress = 128 * FBUtilities.getAvailableProcessors();
 
     private StorageProxy()
@@ -1394,74 +1388,37 @@ public class StorageProxy implements StorageProxyMBean
         Preconditions.checkNotNull(localReplica);
 
         /* pfouto s */
-
-        //Get client clock
-        PartitionUpdate table = mutation.getPartitionUpdates().stream().findFirst().get();
-        Collection<ColumnData> columnData = table.iterator().next().columnData();
-        BufferCell clockCell = (BufferCell) columnData.stream().filter(c -> c.column().name.toString().equals("clock")).findFirst().get();
-        byte[] clientClockData = clockCell.value().array();
-
-        //Read row from db
-        SinglePartitionReadCommand singlePartitionReadCommand = SinglePartitionReadCommand.create(
-        table.metadata(), FBUtilities.nowInSeconds(), table.partitionKey(),
-        ColumnFilter.selection(RegularAndStaticColumns.of(clockCell.column())),
-        new ClusteringIndexSliceFilter(Slices.ALL, false));
-        PartitionIterator partitionIterator = fetchRows(Collections.singletonList(singlePartitionReadCommand),
-                                                        ConsistencyLevel.ONE, System.nanoTime());
-        //Get row clock
-        Clock clientClock, objectClock;
-        try
+        if(!mutation.getKeyspaceName().equals("system_auth"))
         {
+            //Get client clock
+            PartitionUpdate table = mutation.getPartitionUpdates().stream().findFirst().get();
+            Collection<ColumnData> columnData = table.iterator().next().columnData();
+            BufferCell clockCell = (BufferCell) columnData.stream().filter(c -> c.column().name.toString().equals("clock")).findFirst().get();
+            byte[] clientClockData = clockCell.value().array();
+
+            //Read row from db
+            SinglePartitionReadCommand singlePartitionReadCommand = SinglePartitionReadCommand.create(
+            table.metadata(), FBUtilities.nowInSeconds(), table.partitionKey(),
+            ColumnFilter.selection(RegularAndStaticColumns.of(clockCell.column())),
+            new ClusteringIndexSliceFilter(Slices.ALL, false));
+            PartitionIterator partitionIterator = fetchRows(Collections.singletonList(singlePartitionReadCommand),
+                                                            ConsistencyLevel.ONE, System.nanoTime());
+            byte[] currentClockData = null;
             if (partitionIterator.hasNext())
             {
                 ColumnData next = partitionIterator.next().next().columnData().iterator().next();
-                System.out.println(next);
-                byte[] currentClockData = ((ArrayCell) next).value();
-                objectClock = Clock.fromInputStream(new ByteArrayInputStream(currentClockData));
+                currentClockData = ((ArrayCell) next).value();
             }
-            else
-                objectClock = new Clock();
 
-            ByteArrayInputStream bais = new ByteArrayInputStream(clientClockData);
-            clientClock = Clock.fromInputStream(bais);
-            bais.close();
+            int vUp = GenericProxy.instance.parseAndShip(mutation, currentClockData, clientClockData, clockCell);
+
+            //Return to client update number (vUp)
+            ByteBuffer allocate = ByteBuffer.allocate(8);
+            allocate.put(GenericProxy.myAddr.getAddress()).putInt(vUp).flip();
+            responseHandler.respClock = allocate;
         }
-        catch (IOException e)
-        {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-
-        System.out.println("Client: " + clientClock + " Current: " + objectClock + ' ' + stage + ' ' + Thread.currentThread());
-
-        //Replace in mutation
-        //Need to synchronized from counter++ until ship, to make sure ops are shipped in the correct order...
-        long timestamp;
-        int vUp;
-        synchronized (counterLock)
-        {
-            vUp = ++localCounter;
-            timestamp = FBUtilities.timestampMicros();
-
-            //Update object clock
-            objectClock.merge(clientClock);
-            objectClock.merge((Inet4Address) GenericProxy.myAddr, vUp);
-
-            //Alter mutation with new clock
-            clockCell.setValue(objectClock.toBuffer().flip());
-            clockCell.setTimestamp(timestamp);
-            System.out.println("New cell: " + clockCell);
-
-            GenericProxy.instance.ship(mutation, objectClock, vUp);
-        }
-        //Return to client update number (vUp)
-        ByteBuffer allocate = ByteBuffer.allocate(8);
-        allocate.put(GenericProxy.myAddr.getAddress()).putInt(vUp).flip();
-        responseHandler.respClock = allocate;
         /* pfouto e */
-
         performLocally(stage, localReplica, mutation::apply, responseHandler);
-
 
         if (localDc != null)
         {
