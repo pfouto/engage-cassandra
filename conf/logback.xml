@@ -76,8 +76,9 @@ appender reference in the root level section below.
   <!-- STDOUT console appender to stdout (INFO level) -->
 
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>INFO</level>
+      <level>WARN</level>
     </filter>
     <encoder>
       <pattern>%highlight(%.-1level [%thread] %date{"HH:mm:ss,SSS"} %F:%L): %msg%n</pattern>
@@ -91,7 +92,7 @@ appender reference in the root level section below.
   <root level="INFO">
     <appender-ref ref="SYSTEMLOG" />
     <appender-ref ref="STDOUT" />
-    <appender-ref ref="ASYNCDEBUGLOG" /> <!-- Comment this line to disable debug.log -->
+    <!--appender-ref ref="ASYNCDEBUGLOG" /--> <!-- Comment this line to disable debug.log -->
     <!--
     <appender-ref ref="LogbackMetrics" />
     -->

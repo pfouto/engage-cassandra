@@ -184,7 +184,7 @@ public class StartupChecks
             String jmxPort = System.getProperty("cassandra.jmx.remote.port");
             if (jmxPort == null)
             {
-                logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
+                logger.info("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
                 jmxPort = System.getProperty("cassandra.jmx.local.port");
                 if (jmxPort == null)
                     logger.error("cassandra.jmx.local.port missing from cassandra-env.sh, unable to start local JMX service.");

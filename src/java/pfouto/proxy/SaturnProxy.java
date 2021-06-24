@@ -190,12 +190,28 @@ public class SaturnProxy extends GenericProxy
     @Override
     void internalOnLogTimer()
     {
-        logger.info("Clock {} {}", localCounter, remoteTimestamps);
-        if (!pendingMetadata.isEmpty())
-            logger.info("PendingMetadata {}: {}", pendingMetadata.size(), pendingMetadata.peek());
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        remoteTimestamps.forEach((k,v) -> {
+            String last = k.getHostAddress().substring(10);
+            sb.append(last).append('=').append(v.getValue()).append(' ');
+        });
+        sb.append('}');
+        logger.warn("Clk {} {}", localCounter, sb);
+
+        int pendingDataTotal = 0;
+        for (Map.Entry<InetAddress, Map<Integer, DataMessage>> entry : pendingData.entrySet())
+        {
+            pendingDataTotal += entry.getValue().size();
+        }
+        int pendingMetadataTotal = pendingMetadata.size();
+        if(pendingMetadataTotal > 0 || pendingDataTotal > 0)
+            logger.warn("Pending: m{} d{}", pendingMetadataTotal, pendingDataTotal);
+
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
-                logger.info("PendingData {}: {}", k, v.size());
+                if (logger.isDebugEnabled())
+                    logger.debug("PendingData {}: {}", k, v.size());
         });
     }
 
@@ -225,7 +241,7 @@ public class SaturnProxy extends GenericProxy
                 UpdateNot not = new UpdateNot(myAddr, vUp, partition, new Clock(), null, null);
                 sendMessage(clientChannel, not, null);
                 DataMessage dataMessage = new DataMessage(mutation, new Clock(), vUp);
-                if(partition.equals("migration"))
+                if (partition.equals("migration"))
                     peers.forEach(h -> sendMessage(peerChannel, dataMessage, h));
                 else
                     targets.get(partition).forEach(h -> sendMessage(peerChannel, dataMessage, h));

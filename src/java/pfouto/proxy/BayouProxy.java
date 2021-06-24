@@ -221,12 +221,28 @@ public class BayouProxy extends GenericProxy
     @Override
     void internalOnLogTimer()
     {
-        logger.info("Clock {} {}", localCounter, globalClock);
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        globalClock.forEach((k,v) -> {
+            String last = k.getHostAddress().substring(10);
+            sb.append(last).append('=').append(v.getValue()).append(' ');
+        });
+        sb.append('}');
+        logger.warn("Clk {} {}", localCounter, sb);
+        int pendingDataTotal = 0;
+        for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
+        {
+            pendingDataTotal += entry.getValue().size();
+        }
+        if(pendingDataTotal > 0)
+            logger.warn("Pending: d{}", pendingDataTotal);
+
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
             {
-                logger.info("Pending {}: {}", k, v.size());
-                logger.debug("First: " + v.peek());
+                logger.warn("Pending {}: {}", k, v.size());
+                if (logger.isDebugEnabled())
+                    logger.debug("First: " + v.peek());
             }
         });
     }

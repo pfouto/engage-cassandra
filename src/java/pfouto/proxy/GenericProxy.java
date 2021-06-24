@@ -147,7 +147,7 @@ public abstract class GenericProxy extends GenericProtocol
 
             registerRequestHandler(MutationFinished.REQ_ID, this::onMutationFinished);
 
-            setupPeriodicTimer(new LogTimer(), 5000, 5000);
+            setupPeriodicTimer(new LogTimer(), 30000, 15000);
             internalInit();
         }
         catch (Exception e)
@@ -237,7 +237,7 @@ public abstract class GenericProxy extends GenericProtocol
 
     private void onInConnectionDown(InConnectionDown event, int channelId)
     {
-        logger.warn("Connection in down from {} ({})", event.getNode(), event.getCause());
+        logger.warn("Connection in down from {} ( {} )", event.getNode(), event.getCause());
     }
 
     private void onServerFailed(ServerFailedEvent event, int i)
@@ -254,7 +254,7 @@ public abstract class GenericProxy extends GenericProtocol
 
     private void onServerUp(ServerUpEvent event, int i)
     {
-        logger.info("Connected to server");
+        logger.warn("Connected to server");
     }
 
     public abstract int parseAndShip(Mutation mutation, byte[] currentClockData,

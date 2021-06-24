@@ -888,6 +888,7 @@ public class CassandraDaemon
 
     public static void main(String[] args) throws ProtocolAlreadyExistsException, HandlerRegistrationException, IOException
     {
+        logger.warn("Cassandra starting");
         instance.activate();
         Babel b = Babel.getInstance();
         b.registerProtocol(GenericProxy.instance);

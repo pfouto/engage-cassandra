@@ -115,7 +115,7 @@ public class EngageProxy extends GenericProxy
                     MutableInteger executingClockPos = executing.computeIfAbsent(source, k -> new MutableInteger());
                     if (data.getvUp() != executingClockPos.getValue() + 1)
                     {
-                        logger.error("Executing unexpected op {} {}", data.getvUp(), executing.get(source));
+                        logger.error("Executing unexpected op {} {} {}", source, data.getvUp(), executing.get(source));
                         throw new AssertionError();
                     }
                     executingClockPos.setValue(data.getvUp());
@@ -225,11 +225,32 @@ public class EngageProxy extends GenericProxy
     @Override
     void internalOnLogTimer()
     {
-        logger.info("Clock {} {}", localCounter, globalClock);
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        globalClock.forEach((k,v) -> {
+            String last = k.getHostAddress().substring(10);
+            sb.append(last).append('=').append(v.getValue()).append(' ');
+        });
+        sb.append('}');
+        logger.warn("Clk {} {}", localCounter, sb);
+
+        int pendingDataTotal = 0;
+        for (Map.Entry<InetAddress, Map<Integer, DataMessage>> entry : pendingData.entrySet())
+        {
+            pendingDataTotal += entry.getValue().size();
+        }
+        int pendingMetadataTotal = 0;
+        for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingMetadata.entrySet())
+        {
+            pendingMetadataTotal += entry.getValue().size();
+        }
+        if(pendingMetadataTotal > 0 || pendingDataTotal > 0)
+            logger.warn("Pending: m{} d{}", pendingMetadataTotal, pendingDataTotal);
+
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty() || !pendingMetadata.get(k).isEmpty())
             {
-                logger.info("Pending {}: {}/{}", k, v.size(), pendingMetadata.get(k).size());
+                logger.debug("Pending {}: {}/{}", k, v.size(), pendingMetadata.get(k).size());
                 logger.debug("First: " + pendingMetadata.get(k).peek());
             }
         });
