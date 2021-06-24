@@ -206,7 +206,7 @@ public class SaturnProxy extends GenericProxy
         }
         int pendingMetadataTotal = pendingMetadata.size();
         if(pendingMetadataTotal > 0 || pendingDataTotal > 0)
-            logger.warn("Pending: m{} d{}", pendingMetadataTotal, pendingDataTotal);
+            logger.warn("Pending: m-{} d-{}", pendingMetadataTotal, pendingDataTotal);
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())

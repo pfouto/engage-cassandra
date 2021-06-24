@@ -235,7 +235,7 @@ public class BayouProxy extends GenericProxy
             pendingDataTotal += entry.getValue().size();
         }
         if(pendingDataTotal > 0)
-            logger.warn("Pending: d{}", pendingDataTotal);
+            logger.warn("Pending: d-{}", pendingDataTotal);
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
