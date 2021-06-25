@@ -89,7 +89,10 @@ public abstract class GenericProxy extends GenericProtocol
     {
         super(name, (short) 100);
         targets = new HashMap<>();
+        Runtime.getRuntime().addShutdownHook(new Thread(this::storeClocks));
     }
+
+    abstract void storeClocks();
 
     public abstract void blockUntil(ByteBuffer c);
 
@@ -112,9 +115,9 @@ public abstract class GenericProxy extends GenericProtocol
                 registerChannelEventHandler(clientChannel, ServerFailedEvent.EVENT_ID, this::onServerFailed);
 
                 registerMessageSerializer(clientChannel, TargetsMessage.MSG_ID, TargetsMessage.serializer);
-                registerMessageHandler(clientChannel, TargetsMessage.MSG_ID, this::uponTargetsMessage);
+                registerMessageHandler(clientChannel, TargetsMessage.MSG_ID, this::uponTargetsMessage, this::onMessageFailed);
                 registerMessageSerializer(clientChannel, MetadataFlush.MSG_ID, MetadataFlush.serializer);
-                registerMessageHandler(clientChannel, MetadataFlush.MSG_ID, this::onMetadataFlush);
+                registerMessageHandler(clientChannel, MetadataFlush.MSG_ID, this::onMetadataFlush, this::onMessageFailed);
                 registerMessageSerializer(clientChannel, UpdateNot.MSG_ID, UpdateNot.serializer);
                 registerMessageHandler(clientChannel, UpdateNot.MSG_ID, this::onUpdateNotification, this::onMessageFailed);
 

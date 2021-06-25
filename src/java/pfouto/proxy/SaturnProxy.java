@@ -20,6 +20,10 @@ package pfouto.proxy;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Inet4Address;
@@ -52,6 +56,7 @@ import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
 import pfouto.messages.up.TargetsMessage;
 import pfouto.messages.up.UpdateNot;
+import pfouto.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.data.Host;
@@ -77,7 +82,76 @@ public class SaturnProxy extends GenericProxy
         pendingMetadata = new LinkedList<>();
         pendingData = new HashMap<>();
         lastExec = new AbstractMap.SimpleEntry<>(myAddr, -1);
+        readClocks();
     }
+
+    private void readClocks()
+    {
+        File file = new File("data/clock");
+        if (!file.exists()) return;
+        try (FileInputStream fis = new FileInputStream(file))
+        {
+            try (DataInputStream dis = new DataInputStream(fis))
+            {
+                localCounter = dis.readInt();
+                int mapSize = dis.readInt();
+                for(int i = 0;i<mapSize;i++)
+                {
+                    InetAddress addr = Inet4Address.getByAddress(dis.readNBytes(4));
+                    int val = dis.readInt();
+                    remoteTimestamps.put(addr, new MutableInteger(val));
+                }
+            }
+        }
+        catch (IOException ioe)
+        {
+            logger.error("Error reading clocks", ioe);
+            ioe.printStackTrace();
+        }
+        file.delete();
+        logger.warn("Values read");
+    }
+
+
+    @Override
+    void storeClocks()
+    {
+        if (!pendingMetadata.isEmpty())
+            logger.error("Shutting down with pending metadata!");
+        for (Map.Entry<InetAddress, Map<Integer, DataMessage>> entry : pendingData.entrySet())
+        {
+            if (!entry.getValue().isEmpty())
+                logger.error("Shutting down with pending data!");
+        }
+
+        File file = new File("data/clock");
+        try (FileOutputStream fos = new FileOutputStream(file))
+        {
+            if (!file.exists())
+            {
+                file.createNewFile();
+            }
+            try (DataOutputStream dos = new DataOutputStream(fos))
+            {
+                dos.writeInt(localCounter);
+                dos.writeInt(remoteTimestamps.size());
+                for (Map.Entry<InetAddress, MutableInteger> entry : remoteTimestamps.entrySet())
+                {
+                    InetAddress k = entry.getKey();
+                    MutableInteger v = entry.getValue();
+                    dos.write(k.getAddress());
+                    dos.writeInt(v.getValue());
+                }
+            }
+        }
+        catch (IOException ioe)
+        {
+            logger.error("Error writing clocks", ioe);
+            ioe.printStackTrace();
+        }
+        logger.warn("Values written");
+    }
+
 
     private boolean smaller(Inet4Address adr1, Inet4Address adr2)
     {
@@ -184,7 +258,8 @@ public class SaturnProxy extends GenericProxy
         for (Map.Entry<String, List<Host>> entry : targets.entrySet())
             for (Host h : entry.getValue())
                 if (peers.add(h))
-                    openConnection(h, peerChannel);
+                    setupTimer(new ReconnectTimer(h), 2000);
+                    //openConnection(h, peerChannel);
     }
 
     @Override
@@ -192,7 +267,7 @@ public class SaturnProxy extends GenericProxy
     {
         StringBuilder sb = new StringBuilder();
         sb.append('{');
-        remoteTimestamps.forEach((k,v) -> {
+        remoteTimestamps.forEach((k, v) -> {
             String last = k.getHostAddress().substring(10);
             sb.append(last).append('=').append(v.getValue()).append(' ');
         });
@@ -205,7 +280,7 @@ public class SaturnProxy extends GenericProxy
             pendingDataTotal += entry.getValue().size();
         }
         int pendingMetadataTotal = pendingMetadata.size();
-        if(pendingMetadataTotal > 0 || pendingDataTotal > 0)
+        if (pendingMetadataTotal > 0 || pendingDataTotal > 0)
             logger.warn("Pending: m-{} d-{}", pendingMetadataTotal, pendingDataTotal);
 
         pendingData.forEach((k, v) -> {

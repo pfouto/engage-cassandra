@@ -19,6 +19,11 @@
 package pfouto.proxy;
 
 import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -53,6 +58,7 @@ import pfouto.messages.side.StabMessage;
 import pfouto.messages.up.MetadataFlush;
 import pfouto.messages.up.TargetsMessage;
 import pfouto.messages.up.UpdateNot;
+import pfouto.timers.ReconnectTimer;
 import pfouto.timers.StabTimer;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -77,6 +83,73 @@ public class BayouProxy extends GenericProxy
         executing = new HashMap<>();
         outOfOrderExecuted = new HashMap<>();
         peersMissing = new HashMap<>();
+        readClocks();
+    }
+
+    private void readClocks()
+    {
+        File file = new File("data/clock");
+        if (!file.exists()) return;
+        try (FileInputStream fis = new FileInputStream(file))
+        {
+            try (DataInputStream dis = new DataInputStream(fis))
+            {
+                localCounter = dis.readInt();
+                int mapSize = dis.readInt();
+                for(int i = 0;i<mapSize;i++)
+                {
+                    InetAddress addr = Inet4Address.getByAddress(dis.readNBytes(4));
+                    int val = dis.readInt();
+                    globalClock.put(addr, new MutableInteger(val));
+                    executing.put(addr, new MutableInteger(val));
+                }
+            }
+        }
+        catch (IOException ioe)
+        {
+            logger.error("Error reading clocks", ioe);
+            ioe.printStackTrace();
+        }
+        file.delete();
+        logger.warn("Values read");
+    }
+
+
+    @Override
+    void storeClocks()
+    {
+        for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
+        {
+            if (!entry.getValue().isEmpty())
+                logger.error("Shutting down with pending data!");
+        }
+
+        File file = new File("data/clock");
+        try (FileOutputStream fos = new FileOutputStream(file))
+        {
+            if (!file.exists())
+            {
+                file.createNewFile();
+            }
+            try (DataOutputStream dos = new DataOutputStream(fos))
+            {
+                dos.writeInt(localCounter);
+                dos.writeInt(globalClock.size());
+                for (Map.Entry<InetAddress, MutableInteger> entry : globalClock.entrySet())
+                {
+                    InetAddress k = entry.getKey();
+                    MutableInteger v = entry.getValue();
+                    dos.write(k.getAddress());
+                    dos.writeInt(v.getValue());
+                }
+            }
+        }
+        catch (IOException ioe)
+        {
+            logger.error("Error writing clocks", ioe);
+            ioe.printStackTrace();
+        }
+        logger.warn("Values written");
     }
 
     @Override
@@ -212,7 +285,8 @@ public class BayouProxy extends GenericProxy
         for (Map.Entry<String, List<Host>> entry : targets.entrySet())
             for (Host h : entry.getValue())
                 if (peersMissing.putIfAbsent(h, new MutableInteger(0)) == null)
-                    openConnection(h, peerChannel);
+                    setupTimer(new ReconnectTimer(h), 2000);
+                    //openConnection(h, peerChannel);
 
         bayouStabMs = tm.getBayouStabMs();
         setupPeriodicTimer(new StabTimer(), bayouStabMs, bayouStabMs);
@@ -240,7 +314,7 @@ public class BayouProxy extends GenericProxy
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
             {
-                logger.warn("Pending {}: {}", k, v.size());
+                logger.info("Pending {}: {}", k, v.size());
                 if (logger.isDebugEnabled())
                     logger.debug("First: " + v.peek());
             }
