@@ -68,10 +68,10 @@ public class BayouProxy extends GenericProxy
 {
     private static final Logger logger = LoggerFactory.getLogger(BayouProxy.class);
     final Object counterLock = new Object();
+    final Map<Host, MutableInteger> peersMissing;
     Map<InetAddress, Queue<ProtoMessage>> pendingData;
     Map<InetAddress, MutableInteger> executing;
     Map<InetAddress, PriorityQueue<Integer>> outOfOrderExecuted;
-    Map<Host, MutableInteger> peersMissing;
     ConcurrentMap<InetAddress, MutableInteger> globalClock = new ConcurrentHashMap<>();
     int bayouStabMs;
     int localCounter = 0;
@@ -96,7 +96,7 @@ public class BayouProxy extends GenericProxy
             {
                 localCounter = dis.readInt();
                 int mapSize = dis.readInt();
-                for(int i = 0;i<mapSize;i++)
+                for (int i = 0; i < mapSize; i++)
                 {
                     InetAddress addr = Inet4Address.getByAddress(dis.readNBytes(4));
                     int val = dis.readInt();
@@ -121,7 +121,22 @@ public class BayouProxy extends GenericProxy
         for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
         {
             if (!entry.getValue().isEmpty())
-                logger.error("Shutting down with pending data!");
+            {
+                logger.error("Shutting down with pending data from {}!", entry.getKey());
+                ProtoMessage msg = entry.getValue().peek();
+                if (msg instanceof DataMessage)
+                {
+                    DataMessage dm = (DataMessage) msg;
+                    if (dm.getvUp() != getClockValue(entry.getKey()).getValue() + 1)
+                    {
+                        logger.error(msg.toString());
+                    }
+                }
+                else
+                {
+                    logger.error(msg.toString());
+                }
+            }
         }
 
         File file = new File("data/clock");
@@ -286,7 +301,7 @@ public class BayouProxy extends GenericProxy
             for (Host h : entry.getValue())
                 if (peersMissing.putIfAbsent(h, new MutableInteger(0)) == null)
                     setupTimer(new ReconnectTimer(h), 2000);
-                    //openConnection(h, peerChannel);
+        //openConnection(h, peerChannel);
 
         bayouStabMs = tm.getBayouStabMs();
         setupPeriodicTimer(new StabTimer(), bayouStabMs, bayouStabMs);
@@ -297,7 +312,7 @@ public class BayouProxy extends GenericProxy
     {
         StringBuilder sb = new StringBuilder();
         sb.append('{');
-        globalClock.forEach((k,v) -> {
+        globalClock.forEach((k, v) -> {
             String last = k.getHostAddress().substring(10);
             sb.append(last).append('=').append(v.getValue()).append(' ');
         });
@@ -308,8 +323,8 @@ public class BayouProxy extends GenericProxy
         {
             pendingDataTotal += entry.getValue().size();
         }
-        if(pendingDataTotal > 0)
-            logger.warn("Pending: d-{}", pendingDataTotal);
+        if (pendingDataTotal > 0)
+            logger.warn("Pending: {}", pendingDataTotal);
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
@@ -324,10 +339,13 @@ public class BayouProxy extends GenericProxy
     private void uponStabTimer(StabTimer timer, long tId)
     {
         peersMissing.forEach((k, v) -> {
-            if (v.getValue() != 0)
+            synchronized (v)
             {
-                sendMessage(peerChannel, new StabMessage(v.getValue()), k);
-                v.setValue(0);
+                if (v.getValue() != 0)
+                {
+                    sendMessage(peerChannel, new StabMessage(v.getValue()), k);
+                    v.setValue(0);
+                }
             }
         });
     }
@@ -373,17 +391,20 @@ public class BayouProxy extends GenericProxy
 
                 boolean migration = partition.equals("migration");
                 peersMissing.forEach((k, v) -> {
-                    if (migration || hosts.contains(k))
+                    synchronized (v)
                     {
-                        if (v.getValue() != 0)
+                        if (migration || hosts.contains(k))
                         {
-                            sendMessage(peerChannel, new StabMessage(v.getValue()), k);
-                            v.setValue(0);
+                            if (v.getValue() != 0)
+                            {
+                                sendMessage(peerChannel, new StabMessage(v.getValue()), k);
+                                v.setValue(0);
+                            }
+                            sendMessage(peerChannel, dataMessage, k);
                         }
-                        sendMessage(peerChannel, dataMessage, k);
+                        else
+                            v.setValue(vUp);
                     }
-                    else
-                        v.setValue(vUp);
                 });
             }
             return vUp;

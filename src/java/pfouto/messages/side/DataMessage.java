@@ -96,9 +96,9 @@ public class DataMessage extends ProtoMessage
     public String toString()
     {
         return "DataMessage{" +
-               "mutation=" + mutation +
-               ", vectorClock=" + vectorClock +
+               "mutation=" + mutation.getKeyspaceName() +
                ", vUp=" + vUp +
+               ", vectorClock=" + vectorClock +
                '}';
     }
 }
