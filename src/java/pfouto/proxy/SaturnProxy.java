@@ -255,24 +255,25 @@ public class SaturnProxy extends GenericProxy
     @Override
     void createConnections(TargetsMessage tm)
     {
-        for (Map.Entry<String, List<Host>> entry : targets.entrySet())
-            for (Host h : entry.getValue())
-                if (peers.add(h))
-                    setupTimer(new ReconnectTimer(h), 2000);
-                    //openConnection(h, peerChannel);
+        for (Host h : all)
+        {
+            if (peers.add(h))
+                setupTimer(new ReconnectTimer(h), 2000);
+        }
     }
 
     @Override
     void internalOnLogTimer()
     {
         StringBuilder sb = new StringBuilder();
-        sb.append('{');
+        sb.append("Clk ");
+        sb.append(localCounter);
+        sb.append(" {");
         remoteTimestamps.forEach((k, v) -> {
             String last = k.getHostAddress().substring(10);
             sb.append(last).append('=').append(v.getValue()).append(' ');
         });
         sb.append('}');
-        logger.warn("Clk {} {}", localCounter, sb);
 
         int pendingDataTotal = 0;
         for (Map.Entry<InetAddress, Map<Integer, DataMessage>> entry : pendingData.entrySet())
@@ -281,7 +282,8 @@ public class SaturnProxy extends GenericProxy
         }
         int pendingMetadataTotal = pendingMetadata.size();
         if (pendingMetadataTotal > 0 || pendingDataTotal > 0)
-            logger.warn("Pending: m-{} d-{}", pendingMetadataTotal, pendingDataTotal);
+            sb.append("Pending: m-").append(pendingMetadataTotal).append(" d-").append(pendingDataTotal);
+        logger.warn(sb.toString());
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())

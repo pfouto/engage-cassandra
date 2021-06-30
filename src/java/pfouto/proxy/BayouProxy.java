@@ -29,13 +29,11 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -45,9 +43,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.rows.BufferCell;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
 import pfouto.Clock;
 import pfouto.ImmutableInteger;
@@ -297,12 +292,11 @@ public class BayouProxy extends GenericProxy
     @Override
     void createConnections(TargetsMessage tm)
     {
-        for (Map.Entry<String, List<Host>> entry : targets.entrySet())
-            for (Host h : entry.getValue())
-                if (peersMissing.putIfAbsent(h, new MutableInteger(0)) == null)
-                    setupTimer(new ReconnectTimer(h), 2000);
-        //openConnection(h, peerChannel);
-
+        for (Host h : all)
+        {
+            if (peersMissing.putIfAbsent(h, new MutableInteger(0)) == null)
+                setupTimer(new ReconnectTimer(h), 2000);
+        }
         bayouStabMs = tm.getBayouStabMs();
         setupPeriodicTimer(new StabTimer(), bayouStabMs, bayouStabMs);
     }
@@ -311,20 +305,22 @@ public class BayouProxy extends GenericProxy
     void internalOnLogTimer()
     {
         StringBuilder sb = new StringBuilder();
-        sb.append('{');
+        sb.append("Clk ");
+        sb.append(localCounter);
+        sb.append(" {");
         globalClock.forEach((k, v) -> {
             String last = k.getHostAddress().substring(10);
             sb.append(last).append('=').append(v.getValue()).append(' ');
         });
         sb.append('}');
-        logger.warn("Clk {} {}", localCounter, sb);
         int pendingDataTotal = 0;
         for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
         {
             pendingDataTotal += entry.getValue().size();
         }
         if (pendingDataTotal > 0)
-            logger.warn("Pending: {}", pendingDataTotal);
+            sb.append("\tPending: ").append(pendingDataTotal);
+        logger.warn(sb.toString());
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty())
@@ -387,6 +383,7 @@ public class BayouProxy extends GenericProxy
                 logger.debug("Shipping and executing local {}", vUp);
                 String partition = mutation.getKeyspaceName();
                 DataMessage dataMessage = new DataMessage(mutation, objectClock, vUp);
+
                 List<Host> hosts = targets.get(partition);
 
                 boolean migration = partition.equals("migration");

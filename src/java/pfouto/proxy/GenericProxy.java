@@ -23,6 +23,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -83,12 +84,13 @@ public abstract class GenericProxy extends GenericProtocol
     int clientChannel;
     int peerChannel;
     Map<String, List<Host>> targets;
-    Set<String> all;
+    Set<Host> all;
 
     public GenericProxy(String name)
     {
         super(name, (short) 100);
         targets = new HashMap<>();
+        all = new HashSet<>();
         Runtime.getRuntime().addShutdownHook(new Thread(this::storeClocks));
     }
 
@@ -108,6 +110,9 @@ public abstract class GenericProxy extends GenericProtocol
                 Properties clientProps = new Properties();
                 clientProps.put(SimpleClientChannel.ADDRESS_KEY, "127.0.0.1");
                 clientProps.put(SimpleClientChannel.PORT_KEY, ENGAGE_SERVER_PORT);
+                clientProps.put(SimpleClientChannel.HEARTBEAT_INTERVAL_KEY, "3000");
+                clientProps.put(SimpleClientChannel.HEARTBEAT_TOLERANCE_KEY, "10000");
+
                 clientChannel = createChannel(SimpleClientChannel.NAME, clientProps);
 
                 registerChannelEventHandler(clientChannel, ServerUpEvent.EVENT_ID, this::onServerUp);
@@ -133,6 +138,8 @@ public abstract class GenericProxy extends GenericProtocol
                 Properties peerProps = new Properties();
                 peerProps.put(TCPChannel.ADDRESS_KEY, peerAddr.getHostAddress());
                 peerProps.put(TCPChannel.PORT_KEY, ENGAGE_PEER_PORT);
+                peerProps.put(SimpleClientChannel.HEARTBEAT_INTERVAL_KEY, "3000");
+                peerProps.put(SimpleClientChannel.HEARTBEAT_TOLERANCE_KEY, "10000");
                 peerChannel = createChannel(TCPChannel.NAME, peerProps);
 
                 registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
@@ -150,7 +157,7 @@ public abstract class GenericProxy extends GenericProtocol
 
             registerRequestHandler(MutationFinished.REQ_ID, this::onMutationFinished);
 
-            setupPeriodicTimer(new LogTimer(), 30000, 15000);
+            setupPeriodicTimer(new LogTimer(), 10000, 15000);
             internalInit();
         }
         catch (Exception e)
@@ -180,7 +187,6 @@ public abstract class GenericProxy extends GenericProtocol
     private void uponTargetsMessage(TargetsMessage msg, Host host, short i, int i1)
     {
         logger.info("TargetsMsg Received: " + msg);
-        all = msg.getAll();
 
         try
         {
@@ -190,6 +196,10 @@ public abstract class GenericProxy extends GenericProtocol
                 for (String addr : entry.getValue())
                     partitionHosts.add(new Host(InetAddress.getByName(addr), Integer.parseInt(ENGAGE_PEER_PORT)));
                 targets.put(entry.getKey(), partitionHosts);
+            }
+            for (String s : msg.getAll())
+            {
+                all.add(new Host(InetAddress.getByName(s), Integer.parseInt(ENGAGE_PEER_PORT)));
             }
         }
         catch (Exception e)
@@ -220,6 +230,7 @@ public abstract class GenericProxy extends GenericProtocol
         logger.info("Reconnecting out to " + timer.getNode());
         openConnection(timer.getNode(), peerChannel);
     }
+
     private void onLogTimer(LogTimer timer, long uId)
     {
         internalOnLogTimer();

@@ -43,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.utils.FBUtilities;
@@ -91,7 +92,7 @@ public class EngageProxy extends GenericProxy
             {
                 localCounter = dis.readInt();
                 int mapSize = dis.readInt();
-                for(int i = 0;i<mapSize;i++)
+                for (int i = 0; i < mapSize; i++)
                 {
                     InetAddress addr = Inet4Address.getByAddress(dis.readNBytes(4));
                     int val = dis.readInt();
@@ -294,24 +295,23 @@ public class EngageProxy extends GenericProxy
     @Override
     void createConnections(TargetsMessage tm)
     {
-        for (Map.Entry<String, List<Host>> entry : targets.entrySet())
-            for (Host h : entry.getValue())
-                if (peers.add(h))
-                    setupTimer(new ReconnectTimer(h), 2000);
-                    //openConnection(h, peerChannel);
+        for (Host h : all)
+            if (peers.add(h))
+                setupTimer(new ReconnectTimer(h), 2000);
     }
 
     @Override
     void internalOnLogTimer()
     {
         StringBuilder sb = new StringBuilder();
-        sb.append('{');
-        globalClock.forEach((k,v) -> {
+        sb.append("Clk ");
+        sb.append(localCounter);
+        sb.append(" {");
+        globalClock.forEach((k, v) -> {
             String last = k.getHostAddress().substring(10);
             sb.append(last).append('=').append(v.getValue()).append(' ');
         });
         sb.append('}');
-        logger.warn("Clk {} {}", localCounter, sb);
 
         int pendingDataTotal = 0;
         for (Map.Entry<InetAddress, Map<Integer, DataMessage>> entry : pendingData.entrySet())
@@ -323,8 +323,10 @@ public class EngageProxy extends GenericProxy
         {
             pendingMetadataTotal += entry.getValue().size();
         }
-        if(pendingMetadataTotal > 0 || pendingDataTotal > 0)
-            logger.warn("Pending: m-{} d-{}", pendingMetadataTotal, pendingDataTotal);
+        if (pendingMetadataTotal > 0 || pendingDataTotal > 0)
+            sb.append("Pending: m-").append(pendingMetadataTotal).append(" d-").append(pendingDataTotal);
+        logger.warn(sb.toString());
+
 
         pendingData.forEach((k, v) -> {
             if (!v.isEmpty() || !pendingMetadata.get(k).isEmpty())
@@ -339,14 +341,17 @@ public class EngageProxy extends GenericProxy
     @Override
     public int parseAndShip(Mutation mutation, byte[] currentClockData, byte[] clientClockData, BufferCell clockCell)
     {
-        try {
+        try
+        {
             //Parse clocks
             Clock clientClock, objectClock;
-            if (currentClockData != null) {
+            if (currentClockData != null)
+            {
                 ByteArrayInputStream obais = new ByteArrayInputStream(currentClockData);
                 objectClock = Clock.fromInputStream(obais);
                 obais.close();
-            } else
+            }
+            else
                 objectClock = new Clock();
 
             ByteArrayInputStream cbais = new ByteArrayInputStream(clientClockData);
@@ -361,7 +366,8 @@ public class EngageProxy extends GenericProxy
             //Need to synchronized from counter++ until ship, to make sure ops are shipped in the correct order...
             long timestamp;
             int vUp;
-            synchronized (counterLock) {
+            synchronized (counterLock)
+            {
                 vUp = ++localCounter;
                 timestamp = FBUtilities.timestampMicros();
                 clockCell.setTimestamp(timestamp);
@@ -371,13 +377,15 @@ public class EngageProxy extends GenericProxy
                 UpdateNot not = new UpdateNot(myAddr, vUp, partition, objectClock, null, null);
                 sendMessage(clientChannel, not, null);
                 DataMessage dataMessage = new DataMessage(mutation, objectClock, vUp);
-                if(partition.equals("migration"))
+                if (partition.equals("migration"))
                     peers.forEach(h -> sendMessage(peerChannel, dataMessage, h));
                 else
                     targets.get(partition).forEach(h -> sendMessage(peerChannel, dataMessage, h));
             }
             return vUp;
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             logger.error("Exception in ship: " + e.getMessage());
             throw new AssertionError(e);
         }

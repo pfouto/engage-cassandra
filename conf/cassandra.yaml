@@ -706,7 +706,7 @@ native_transport_port: 9042
 # native_transport_port_ssl: 9142
 # The maximum threads for handling requests (note that idle threads are stopped
 # after 30 seconds so there is not corresponding minimum setting).
-# native_transport_max_threads: 128
+native_transport_max_threads: 1024
 #
 # The maximum size of allowed frame. Frame (requests) larger than this will
 # be rejected as invalid. The default is 256MB. If you're changing this parameter,

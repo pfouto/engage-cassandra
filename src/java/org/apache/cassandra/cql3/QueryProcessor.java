@@ -545,7 +545,7 @@ public class QueryProcessor implements QueryHandler
         }
 
         /* pfouto s */
-        if (customPayload.containsKey("c")) {
+        if (customPayload != null && customPayload.containsKey("c")) {
             GenericProxy.instance.blockUntil(customPayload.get("c"));
         }
         /* pfouto e */
