@@ -275,7 +275,7 @@ public abstract class GenericProxy extends GenericProtocol
                                      byte[] clientClockData, BufferCell clockCell);
 
     public enum Protocol
-    {bayou, saturn, edgegage, engage}
+    {bayou, saturn, edgegage, engage, engage2}
 
     static
     {
@@ -289,6 +289,9 @@ public abstract class GenericProxy extends GenericProtocol
                 break;
             case engage:
                 instance = new EngageProxy();
+                break;
+            case engage2:
+                instance = new Engage2Proxy();
                 break;
             case saturn:
                 instance = new SaturnProxy();
