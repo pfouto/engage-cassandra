@@ -78,6 +78,7 @@ public abstract class GenericProxy extends GenericProtocol
     public static final GenericProxy instance;
     public static final InetAddress myAddr;
     public static final Protocol protocol;
+    public static final boolean logVisibility;
     private static final Config conf;
 
     private static final Logger logger = LoggerFactory.getLogger(GenericProxy.class);
@@ -281,6 +282,7 @@ public abstract class GenericProxy extends GenericProtocol
     {
         conf = DatabaseDescriptor.getRawConfig();
         protocol = Protocol.valueOf(conf.protocol);
+        logVisibility = conf.log_visibility;
         myAddr = FBUtilities.getJustBroadcastNativeAddress();
         switch (protocol)
         {

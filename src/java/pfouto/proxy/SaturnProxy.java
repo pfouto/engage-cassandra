@@ -183,6 +183,8 @@ public class SaturnProxy extends GenericProxy
     void onMutationFinished(MutationFinished request, short sourceProto)
     {
         executing--;
+        if(logVisibility)
+            logger.info("OP_EXEC " + request.getSource().getHostAddress() + ' ' + request.getvUp());
         MutableInteger value = remoteTimestamps.computeIfAbsent(request.getSource(), k -> new MutableInteger());
         synchronized (value)
         {
@@ -323,6 +325,8 @@ public class SaturnProxy extends GenericProxy
                 else
                     targets.get(partition).forEach(h -> sendMessage(peerChannel, dataMessage, h));
             }
+            if(logVisibility)
+                logger.info("OP_GEN " + myAddr.getHostAddress() + ' ' + vUp);
             return vUp;
         }
         catch (Exception e)

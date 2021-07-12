@@ -52,6 +52,7 @@ public class Config
     public static final String PROPERTY_PREFIX = "cassandra.";
 
     public String protocol;
+    public boolean log_visibility;
     public String peer_interface;
 
     public String cluster_name = "Test Cluster";

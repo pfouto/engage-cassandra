@@ -10,6 +10,7 @@
 cluster_name: 'Test Cluster'
 
 protocol: 'bayou'
+log_visibility: false
 #bayou, engage, edgegage, saturn
 peer_interface: 'br0'
 

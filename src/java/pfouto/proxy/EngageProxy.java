@@ -31,7 +31,6 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
@@ -43,7 +42,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.utils.FBUtilities;
@@ -224,6 +222,8 @@ public class EngageProxy extends GenericProxy
     {
         InetAddress source = request.getSource();
         int vUp = request.getvUp();
+        if(logVisibility)
+            logger.info("OP_EXEC " + source.getHostAddress() + ' ' + vUp);
         MutableInteger cPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
         PriorityQueue<Integer> ooo = outOfOrderExecuted.computeIfAbsent(source, k -> new PriorityQueue<>());
         //If is next "executed" op, check for following finished ops and update clock
@@ -382,6 +382,8 @@ public class EngageProxy extends GenericProxy
                 else
                     targets.get(partition).forEach(h -> sendMessage(peerChannel, dataMessage, h));
             }
+            if(logVisibility)
+                logger.info("OP_GEN " + myAddr.getHostAddress() + ' ' + vUp);
             return vUp;
         }
         catch (Exception e)

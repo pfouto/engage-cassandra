@@ -38,9 +38,9 @@ appender reference in the root level section below.
       <!-- rollover daily -->
       <fileNamePattern>${logFilename}.log.%d{yyyy-MM-dd}.%i.zip</fileNamePattern>
       <!-- each file should be at most 50MB, keep 7 days worth of history, but at most 5GB -->
-      <maxFileSize>50MB</maxFileSize>
+      <maxFileSize>5GB</maxFileSize>
       <maxHistory>7</maxHistory>
-      <totalSizeCap>5GB</totalSizeCap>
+      <totalSizeCap>25GB</totalSizeCap>
     </rollingPolicy>
     <encoder>
       <pattern>%-5level [%thread] %date{ISO8601} %F:%L - %msg%n</pattern>
