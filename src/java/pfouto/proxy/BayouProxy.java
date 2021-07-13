@@ -300,7 +300,10 @@ public class BayouProxy extends GenericProxy
                 setupTimer(new ReconnectTimer(h), 2000);
         }
         bayouStabMs = tm.getBayouStabMs();
-        setupPeriodicTimer(new StabTimer(), bayouStabMs, bayouStabMs);
+        if(bayouStabMs > 0)
+        {
+            setupPeriodicTimer(new StabTimer(), bayouStabMs, bayouStabMs);
+        }
     }
 
     @Override
@@ -402,7 +405,14 @@ public class BayouProxy extends GenericProxy
                             sendMessage(peerChannel, dataMessage, k);
                         }
                         else
-                            v.setValue(vUp);
+                        {
+                            if(bayouStabMs > 0)
+                            {
+                                v.setValue(vUp);
+                            } else {
+                                sendMessage(peerChannel, new StabMessage(vUp), k);
+                            }
+                        }
                     }
                 });
             }
