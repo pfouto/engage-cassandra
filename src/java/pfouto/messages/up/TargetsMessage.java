@@ -40,6 +40,7 @@ public class TargetsMessage extends ProtoMessage
         @Override
         public void serialize(TargetsMessage msg, ByteBuf out) throws IOException
         {
+            Utils.serializeString(msg.myName, out);
             out.writeInt(msg.getMap().size());
             msg.getMap().forEach((k, v) -> {
                 Utils.serializeString(k, out);
@@ -47,13 +48,17 @@ public class TargetsMessage extends ProtoMessage
                 v.forEach(h -> Utils.serializeString(h, out));
             });
             out.writeInt(msg.getAll().size());
-            msg.getAll().forEach(h -> Utils.serializeString(h, out));
+            msg.getAll().forEach((k,v) -> {
+                Utils.serializeString(k, out);
+                Utils.serializeString(v, out);
+            });
             out.writeInt(msg.bayouStabMs);
         }
 
         @Override
         public TargetsMessage deserialize(ByteBuf in) throws IOException
         {
+            String myName = Utils.deserializeString(in);
             int nElems = in.readInt();
             HashMap<String, List<String>> map = new HashMap<>();
             for (int i = 0; i < nElems; i++)
@@ -68,25 +73,34 @@ public class TargetsMessage extends ProtoMessage
                 map.put(key, objects);
             }
             int nAll = in.readInt();
-            Set<String> all = new HashSet<>();
+            Map<String,String> all = new HashMap<>();
             for (int i = 0; i < nAll; i++)
             {
-                all.add(Utils.deserializeString(in));
+                String key = Utils.deserializeString(in);
+                String value = Utils.deserializeString(in);
+                all.put(key, value);
             }
             int bayouStabMs = in.readInt();
-            return new TargetsMessage(map, all, bayouStabMs);
+            return new TargetsMessage(myName, map, all, bayouStabMs);
         }
     };
+    private final String myName;
     private final Map<String, List<String>> map;
-    private final Set<String> all;
+    private final Map<String, String> all;
     private final int bayouStabMs;
 
-    public TargetsMessage(Map<String, List<String>> map, Set<String> all, int bayouStabMs)
+    public TargetsMessage(String myName, Map<String, List<String>> map, Map<String, String> all, int bayouStabMs)
     {
         super(MSG_ID);
+        this.myName = myName;
         this.map = map;
         this.all = all;
         this.bayouStabMs = bayouStabMs;
+    }
+
+    public String getMyName()
+    {
+        return myName;
     }
 
     public Map<String, List<String>> getMap()
@@ -94,7 +108,7 @@ public class TargetsMessage extends ProtoMessage
         return map;
     }
 
-    public Set<String> getAll()
+    public Map<String,String> getAll()
     {
         return all;
     }
@@ -108,7 +122,8 @@ public class TargetsMessage extends ProtoMessage
     public String toString()
     {
         return "TargetsMessage{" +
-               "map=" + map +
+               "myName=" + myName +
+               ", map=" + map +
                ", all=" + all +
                ", bayouStabMs=" + bayouStabMs +
                '}';

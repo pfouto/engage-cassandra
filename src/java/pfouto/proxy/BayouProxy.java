@@ -216,7 +216,7 @@ public class BayouProxy extends GenericProxy
                         {
                             dm.getMutation().apply();
                             //Once finished, "onMutationFinished" is called
-                            sendRequest(new MutationFinished(dm.getvUp(), source), this.getProtoId());
+                            sendRequest(new MutationFinished(dm.getvUp(), dm.getMutation().getKeyspaceName(), source), this.getProtoId());
                         }
                         catch (Exception e)
                         {
@@ -239,7 +239,7 @@ public class BayouProxy extends GenericProxy
         InetAddress source = request.getSource();
         int vUp = request.getvUp();
         if(logVisibility)
-            logger.info("OP_EXEC " + source.getHostAddress() + ' ' + vUp);
+            logger.info("OP_EXEC " + source.getHostAddress() + ' ' + vUp + ' ' + request.getPartition());
         MutableInteger cPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
         PriorityQueue<Integer> ooo = outOfOrderExecuted.computeIfAbsent(source, k -> new PriorityQueue<>());
         //If is next "executed" op, check for following finished ops and update clock

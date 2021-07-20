@@ -189,6 +189,7 @@ public abstract class GenericProxy extends GenericProtocol
     {
         logger.info("TargetsMsg Received: " + msg);
 
+        logger.info("MyName: " + msg.getMyName());
         try
         {
             for (Map.Entry<String, List<String>> entry : msg.getMap().entrySet())
@@ -198,7 +199,7 @@ public abstract class GenericProxy extends GenericProtocol
                     partitionHosts.add(new Host(InetAddress.getByName(addr), Integer.parseInt(ENGAGE_PEER_PORT)));
                 targets.put(entry.getKey(), partitionHosts);
             }
-            for (String s : msg.getAll())
+            for (String s : msg.getAll().keySet())
             {
                 all.add(new Host(InetAddress.getByName(s), Integer.parseInt(ENGAGE_PEER_PORT)));
             }

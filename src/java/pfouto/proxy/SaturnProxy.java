@@ -184,7 +184,7 @@ public class SaturnProxy extends GenericProxy
     {
         executing--;
         if(logVisibility)
-            logger.info("OP_EXEC " + request.getSource().getHostAddress() + ' ' + request.getvUp());
+            logger.info("OP_EXEC " + request.getSource().getHostAddress() + ' ' + request.getvUp() + ' ' + request.getPartition());
         MutableInteger value = remoteTimestamps.computeIfAbsent(request.getSource(), k -> new MutableInteger());
         synchronized (value)
         {
@@ -220,7 +220,7 @@ public class SaturnProxy extends GenericProxy
                     {
                         remove.getMutation().apply();
                         //Once finished, "onMutationFinished" is called
-                        sendRequest(new MutationFinished(not.getvUp(), not.getSource()), this.getProtoId());
+                        sendRequest(new MutationFinished(not.getvUp(), remove.getMutation().getKeyspaceName(), not.getSource()), this.getProtoId());
                     }
                     catch (Exception e)
                     {

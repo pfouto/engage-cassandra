@@ -201,7 +201,7 @@ public class Engage2Proxy extends GenericProxy
                         {
                             data.getMutation().apply();
                             //Once finished, "onMutationFinished" is called
-                            sendRequest(new MutationFinished(data.getvUp(), source), this.getProtoId());
+                            sendRequest(new MutationFinished(data.getvUp(), data.getMutation().getKeyspaceName(), source), this.getProtoId());
                         }
                         catch (Exception e)
                         {
@@ -223,7 +223,7 @@ public class Engage2Proxy extends GenericProxy
         InetAddress source = request.getSource();
         int vUp = request.getvUp();
         if(logVisibility)
-            logger.info("OP_EXEC " + source.getHostAddress() + ' ' + vUp);
+            logger.info("OP_EXEC " + source.getHostAddress() + ' ' + vUp + ' ' + request.getPartition());
         MutableInteger cPos = globalClock.computeIfAbsent(source, k -> new MutableInteger());
         PriorityQueue<Integer> ooo = outOfOrderExecuted.computeIfAbsent(source, k -> new PriorityQueue<>());
         //If is next "executed" op, check for following finished ops and update clock

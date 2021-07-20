@@ -28,12 +28,14 @@ public class MutationFinished extends ProtoRequest
     public static final short REQ_ID = 101;
 
     private final int vUp;
+    private final String partition;
     private final InetAddress source;
 
-    public MutationFinished(int vUp, InetAddress source)
+    public MutationFinished(int vUp, String partition, InetAddress source)
     {
         super(REQ_ID);
         this.vUp = vUp;
+        this.partition = partition;
         this.source = source;
     }
 
@@ -45,5 +47,10 @@ public class MutationFinished extends ProtoRequest
     public InetAddress getSource()
     {
         return source;
+    }
+
+    public String getPartition()
+    {
+        return partition;
     }
 }
