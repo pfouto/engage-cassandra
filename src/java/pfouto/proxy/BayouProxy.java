@@ -71,6 +71,8 @@ public class BayouProxy extends GenericProxy
     int bayouStabMs;
     int localCounter = 0;
 
+    int nMetadataMessages = 0;
+
     public BayouProxy()
     {
         super("BayouProxy");
@@ -113,6 +115,8 @@ public class BayouProxy extends GenericProxy
     @Override
     void storeClocks()
     {
+        logger.info("Number of messages: {}", nMetadataMessages);
+
         for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
         {
             if (!entry.getValue().isEmpty())
@@ -216,7 +220,8 @@ public class BayouProxy extends GenericProxy
                         {
                             dm.getMutation().apply();
                             //Once finished, "onMutationFinished" is called
-                            sendRequest(new MutationFinished(dm.getvUp(), dm.getMutation().getKeyspaceName(), source), this.getProtoId());
+                            sendRequest(new MutationFinished(dm.getvUp(), dm.getMutation().getKeyspaceName(), source),
+                                        this.getProtoId());
                         }
                         catch (Exception e)
                         {
@@ -344,6 +349,7 @@ public class BayouProxy extends GenericProxy
             {
                 if (v.getValue() != 0)
                 {
+                    nMetadataMessages++;
                     sendMessage(peerChannel, new StabMessage(v.getValue()), k);
                     v.setValue(0);
                 }
@@ -400,6 +406,7 @@ public class BayouProxy extends GenericProxy
                             if (v.getValue() != 0)
                             {
                                 sendMessage(peerChannel, new StabMessage(v.getValue()), k);
+                                nMetadataMessages++;
                                 v.setValue(0);
                             }
                             sendMessage(peerChannel, dataMessage, k);
@@ -410,6 +417,7 @@ public class BayouProxy extends GenericProxy
                             {
                                 v.setValue(vUp);
                             } else {
+                                nMetadataMessages++;
                                 sendMessage(peerChannel, new StabMessage(vUp), k);
                             }
                         }
