@@ -115,7 +115,7 @@ public class BayouProxy extends GenericProxy
     @Override
     void storeClocks()
     {
-        logger.info("Number of messages: {}", nMetadataMessages);
+        logger.warn("Number of messages: {}", nMetadataMessages);
 
         for (Map.Entry<InetAddress, Queue<ProtoMessage>> entry : pendingData.entrySet())
         {
@@ -406,7 +406,7 @@ public class BayouProxy extends GenericProxy
                             if (v.getValue() != 0)
                             {
                                 sendMessage(peerChannel, new StabMessage(v.getValue()), k);
-                                nMetadataMessages++;
+                                //nMetadataMessages++;
                                 v.setValue(0);
                             }
                             sendMessage(peerChannel, dataMessage, k);
